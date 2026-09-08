@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: Helvetica, Arial, sans-serif;
+      font-size: 10.5pt;
+      line-height: 1.55;
+      color: #1a2236;
+    }
+    .header {
+      text-align: center;
+      border-bottom: 2.5px solid #0b4f8a;
+      padding-bottom: 12px;
+      margin-bottom: 20px;
+    }
+    .logo { font-size: 17pt; font-weight: bold; color: #0b4f8a; letter-spacing: 1px; }
+    .subtitulo { font-size: 9pt; color: #546e8a; margin-top: 4px; }
+
+    .ficha {
+      background: #f0f6ff;
+      border: 1px solid #c8ddf5;
+      padding: 10px 14px;
+      margin-bottom: 18px;
+      font-size: 9.5pt;
+      width: 100%;
+    }
+    .ficha table { width: 100%; border-collapse: collapse; }
+    .ficha td { padding: 3px 12px 3px 0; vertical-align: top; }
+    .ficha span { color: #546e8a; }
+    .ficha strong { color: #1a2236; }
+
+    .seccion { margin-bottom: 14px; page-break-inside: avoid; }
+    .seccion-titulo {
+      background: #0b4f8a;
+      color: #fff;
+      padding: 4px 10px;
+      font-weight: bold;
+      font-size: 9.5pt;
+      letter-spacing: 0.5px;
+      margin-bottom: 7px;
+      border-left: 4px solid #073a6b;
+    }
+    .seccion-contenido {
+      padding: 0 10px;
+      text-align: justify;
+      font-size: 9.5pt;
+      white-space: pre-wrap;
+    }
+
+    .firma-bloque {
+      margin-top: 28px;
+      border-top: 1.5px solid #bcc8d4;
+      padding-top: 14px;
+      width: 100%;
+    }
+    .firma-bloque table { width: 100%; border-collapse: collapse; }
+    .firma-item { text-align: center; width: 48%; }
+    .firma-linea {
+      border-bottom: 1px solid #546e8a;
+      width: 80%;
+      margin: 0 auto 4px;
+      height: 28px;
+    }
+    .firma-label { font-size: 8.5pt; color: #546e8a; }
+
+    .footer {
+      text-align: center;
+      font-size: 8pt;
+      color: #8fa4b8;
+      margin-top: 36px;
+      border-top: 1px solid #dde4ec;
+      padding-top: 8px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="logo">NEO RAYOS X DIGITAL</div>
+    <div class="subtitulo">Centro de Diagnóstico Radiológico Asistido por Inteligencia Artificial · La Paz, Bolivia</div>
+    <div class="subtitulo" style="margin-top:3px; font-weight:bold; color:#0b4f8a;">INFORME RADIOLÓGICO PRELIMINAR</div>
+  </div>
+
+  <div class="ficha">
+    <table>
+      <tr>
+        <td><span>Paciente: </span><strong>{{ paciente.nombres }} {{ paciente.apellidos }}</strong></td>
+        <td><span>CI: </span><strong>{{ paciente.ci }}</strong></td>
+        <td><span>Edad: </span><strong>{{ edad }} años</strong></td>
+        <td><span>Género: </span><strong>{{ paciente.get_genero_display }}</strong></td>
+      </tr>
+      <tr>
+        <td><span>Fecha nacimiento: </span><strong>{{ paciente.fecha_nacimiento|date:"d/m/Y" }}</strong></td>
+        <td><span>Nro. Estudio: </span><strong>#{{ estudio.id }}</strong></td>
+        <td><span>Fecha estudio: </span><strong>{{ estudio.fecha|date:"d/m/Y" }}</strong></td>
+        <td><span>Fecha informe: </span><strong>{{ fecha_hoy }}</strong></td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="seccion">
+    <div class="seccion-titulo">TÉCNICA</div>
+    <div class="seccion-contenido">{{ informe.tecnica }}</div>
+  </div>
+
+  <div class="seccion">
+    <div class="seccion-titulo">HALLAZGOS RADIOLÓGICOS</div>
+    <div class="seccion-contenido">{{ informe.hallazgos }}</div>
+  </div>
+
+  <div class="seccion">
+    <div class="seccion-titulo">IMPRESIÓN DIAGNÓSTICA</div>
+    <div class="seccion-contenido">{{ informe.impresion }}</div>
+  </div>
+
+  <div class="seccion">
+    <div class="seccion-titulo">RECOMENDACIONES</div>
+    <div class="seccion-contenido">{{ informe.recomendaciones }}</div>
+  </div>
+
+  <div class="firma-bloque">
+    <table>
+      <tr>
+        <td class="firma-item">
+          <div class="firma-linea"></div>
+          <p class="firma-label">
+            {% if medico %}{{ medico.get_full_name }}{% else %}Médico Radiólogo{% endif %}
+          </p>
+          <p class="firma-label">Médico Radiólogo Especialista</p>
+        </td>
+        <td class="firma-item">
+          <div class="firma-linea"></div>
+          <p class="firma-label">
+            Fecha de firma: {{ informe.fecha_firmado|date:"d/m/Y H:i" }}
+          </p>
+          <p class="firma-label">Informe electrónico firmado</p>
+        </td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="footer">
+    Generado por Neo RX · Sistema de apoyo diagnóstico ResNet-50 (25.5M parámetros) ·
+    Entrenado: PadChest · NIH · RSNA · SIIM · VinBigData<br/>
+    <strong>Documento confidencial — Uso médico exclusivo · No reemplaza criterio clínico del especialista</strong>
+  </div>
+
+</body>
+</html>
