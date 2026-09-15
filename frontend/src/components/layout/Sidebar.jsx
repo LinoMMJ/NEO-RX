@@ -3,7 +3,7 @@ import { NavLink } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   LayoutDashboard, ScanLine, FolderOpen, Users, FileText,
-  ChevronRight, Wind,
+  ChevronRight, Wind, Shield, Settings,
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 
@@ -13,6 +13,7 @@ const NAV = [
   { to: '/estudios',   icon: FolderOpen,      label: 'Estudios' },
   { to: '/pacientes',  icon: Users,           label: 'Pacientes' },
   { to: '/informes',   icon: FileText,        label: 'Informes',  roles: ['medico'] },
+  { to: '/admin/usuarios', icon: Settings,    label: 'Admin Usuarios', roles: ['administrador'] },
 ]
 
 const ROL_LABEL = { medico: 'Médico Radiólogo', tecnico: 'Técnico Radiólogo', administrador: 'Administrador' }

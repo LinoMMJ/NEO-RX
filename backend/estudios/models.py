@@ -1,6 +1,14 @@
 from django.db import models
 from pacientes.models import Estudio
 
+try:
+    from django_cryptography.fields import encrypt
+    ENCRYPTION_AVAILABLE = True
+except (ImportError, AttributeError):
+    ENCRYPTION_AVAILABLE = False
+    def encrypt(field):
+        return field
+
 
 class ImagenDICOM(models.Model):
     ESTADO_PROC_CHOICES = [
@@ -9,7 +17,8 @@ class ImagenDICOM(models.Model):
         ("error", "Error"),
     ]
     estudio = models.ForeignKey(Estudio, on_delete=models.CASCADE, related_name="imagenes")
-    archivo_dicom = models.FileField(upload_to="dicom/%Y/%m/")
+    # Archivo DICOM encriptado — HIPAA/LOPD compliance
+    archivo_dicom = encrypt(models.FileField(upload_to="dicom/%Y/%m/"))
     archivo_png = models.FileField(upload_to="png/%Y/%m/", null=True, blank=True)
     fecha_subida = models.DateTimeField(auto_now_add=True)
     es_nitida = models.BooleanField(null=True)

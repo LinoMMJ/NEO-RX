@@ -44,6 +44,12 @@
 | **23** | **Testing: pytest backend (auth, pacientes, estudios, diagnóstico, informes), vitest frontend** | | | | | | | ██ ██ | 2 | 0% ⏳ |
 | **24** | **Documentación API: drf-spectacular Swagger/OpenAPI, docs técnicas, README, arquitectura C4** | | | | | | | ██ ██ | 2 | 0% ⏳ |
 | **25** | **Despliegue y entrega: Dockerfiles prod, docker-compose.prod, backup script, tag v1.0, defensa** | | | | | | | | ██ | 1 | 0% ⏳ |
+| **26** | **Fine-tuning CNN: Descarga NIH ChestX-ray14, preprocesamiento, splits train/val/test** | | | | | | ██ | 1 | 0% ⏳ |
+| **27** | **Fine-tuning CNN: Entrenamiento ResNet-50 (head + partial unfreeze) en RunPod A100** | | | | | | ██ ██ | 2 | 0% ⏳ |
+| **28** | **Fine-tuning CNN: Evaluación métricas (AUC, sensibilidad, especificidad por patología)** | | | | | | ██ | 1 | 0% ⏳ |
+| **29** | **Fine-tuning CNN: Integración checkpoint en DetectorTorax + validación inferencia** | | | | | | ██ | 1 | 0% ⏳ |
+| **30** | **Fine-tuning CNN: Dockerfile.training + scripts reproducibles + docs** | | | | | | ██ | 1 | 0% ⏳ |
+| **31** | **Fine-tuning CNN: Comparativa baseline vs fine-tuned + reporte técnico** | | | | | | ██ | 1 | 0% ⏳ |
 
 ---
 
@@ -66,6 +72,7 @@
 | **4. Informes + Export** | 16-19 | 4 | 🔄 50% (falta 18-19) |
 | **5. Admin + Métricas + Seguridad** | 20-22 | 2 | ⏳ 0% |
 | **6. Testing + Docs + Deploy** | 23-25 | 2 | ⏳ 0% |
+| **7. Fine-tuning CNN (NUEVO)** | 26-31 | 3 | ⏳ 0% |
 
 ---
 
@@ -92,4 +99,17 @@
 
 ---
 
-**Generado:** 8 septiembre 2026 | **Basado en código real** (no plan teórico) | **25 tareas principales** | **Cabe en 13 semanas**
+## 📈 **% AVANCE ESTIMADO POR HITO**
+
+| Hito | Fecha Límite | % Proyecto | Estado |
+|------|--------------|------------|--------|
+| **MVP Core Funcional** | 21 Sep (Semana 4) | 45% | ✅ **YA ALCANZADO** |
+| **IA + Diagnóstico Completo** | 12 Oct (Semana 7) | 60% | ✅ **YA ALCANZADO** |
+| **Informes + Export** | 2 Nov (Semana 10) | 70% | 🔄 En curso (falta PDF/DICOM) |
+| **Gestión/Admin/Seguridad** | 16 Nov (Semana 12) | 80% | ⏳ Por iniciar |
+| **Testing + Docs + Deploy** | 20 Nov (Semana 13) | 90% | ⏳ Por iniciar |
+| **Fine-tuning CNN propio** | 27 Nov (Semana 14-15) | 100% | ⏳ Por iniciar |
+
+---
+
+**Generado:** 8 septiembre 2026 | **Basado en código real** (no plan teórico) | **31 tareas principales** | **15-16 semanas (incluye fine-tuning)**

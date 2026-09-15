@@ -8,6 +8,7 @@ import DashboardPage from './pages/DashboardPage'
 import EscaneoPage from './pages/EscaneoPage'
 import InformePage from './pages/InformePage'
 import PacientesPage from './pages/PacientesPage'
+import AdminUsuariosPage from './pages/AdminUsuariosPage'
 
 function ProtectedRoute({ children, roles }) {
   const { isAuth, rol } = useAuth()
@@ -38,7 +39,10 @@ function AppRoutes() {
         <ProtectedRoute roles={['medico']}><Layout><InformePage /></Layout></ProtectedRoute>
       } />
       <Route path="/pacientes" element={
-        <ProtectedRoute><Layout><PacientesPage /></Layout></ProtectedRoute>
+        <ProtectedRoute><Layout><PacientesPage /></Layout></ProtectedRoute
+      } />
+      <Route path="/admin/usuarios" element={
+        <ProtectedRoute roles={['administrador']}><Layout><AdminUsuariosPage /></Layout></ProtectedRoute>
       } />
       {/* /estudios redirige a escaneo (no hay página de lista separada aún) */}
       <Route path="/estudios" element={<Navigate to="/escaneo" replace />} />

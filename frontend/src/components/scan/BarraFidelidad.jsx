@@ -1,34 +1,81 @@
 /**
  * BarraFidelidad — Muestra la confianza diagnóstica del modelo CNN.
  *
- * El valor proviene directamente de la salida del modelo ResNet-50:
- * una probabilidad posterior calibrada en [0,1] para la patología de mayor
- * relevancia. NO es un threshold de imagen; es la salida de la red neuronal.
- *
- * Umbral operativo 50% = op_threshs del modelo torchxrayvision (valor
- * determinado durante la fase de calibración sobre los datasets de prueba).
+ * Consume niveles clínicos centralizados desde /api/diagnostico/niveles-clinicos/
+ * Elimina duplicación de umbrales hardcodeados en frontend.
  */
+import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
+import { api } from '../../api'
 
-// Color según nivel de confianza
-function getColor(prob) {
-  if (prob < 0.30) return { bar: 'from-slate-400 to-slate-500',   text: 'text-slate-400', label: 'MARGINAL' }
-  if (prob < 0.50) return { bar: 'from-warning to-amber-400',     text: 'text-warning',   label: 'LEVE' }
-  if (prob < 0.70) return { bar: 'from-orange-400 to-orange-500', text: 'text-orange-400',label: 'MODERADO' }
-  return              { bar: 'from-danger to-rose-500',           text: 'text-danger',    label: 'ELEVADO' }
+const NIVEL_LABELS = {
+  alto: 'ELEVADO',
+  moderado: 'MODERADO',
+  leve: 'LEVE',
+  marginal: 'MARGINAL',
+}
+
+const NIVEL_COLORS = {
+  alto: 'danger',
+  moderado: 'orange',
+  leve: 'warning',
+  marginal: 'slate',
+}
+
+function getBarColor(nivel) {
+  switch (nivel) {
+    case 'alto':      return 'from-danger to-rose-500'
+    case 'moderado':  return 'from-orange-400 to-orange-500'
+    case 'leve':      return 'from-warning to-amber-400'
+    default:          return 'from-slate-400 to-slate-500'
+  }
+}
+
+function getTextColor(nivel) {
+  return `text-${NIVEL_COLORS[nivel] || 'slate'}-400`
+}
+
+function getBgColor(nivel) {
+  return `${NIVEL_COLORS[nivel] || 'slate'} bg-current/10`
 }
 
 export default function BarraFidelidad({ patologiaPrincipal, probabilidad, tiempoInferencia }) {
   if (probabilidad == null) return null
   const pct = Math.round(probabilidad * 100)
-  const { bar, text, label } = getColor(probabilidad)
+  const [nivelesConfig, setNivelesConfig] = useState(null)
+
+  // Cargar config de niveles (cacheable)
+  useEffect(() => {
+    api.get('/diagnostico/niveles-clinicos/')
+      .then(res => setNivelesConfig(res.data))
+      .catch(err => console.warn('[BarraFidelidad] Niveles no cargados, usando fallback:', err))
+  }, [])
+
+  // Clasificar usando backend config o fallback
+  const nivel = (() => {
+    if (!nivelesConfig) {
+      if (probabilidad >= 0.70) return 'alto'
+      if (probabilidad >= 0.50) return 'moderado'
+      if (probabilidad >= 0.30) return 'leve'
+      return 'marginal'
+    }
+    const { alto, moderado, leve } = nivelesConfig.niveles_generales
+    if (probabilidad >= alto) return 'alto'
+    if (probabilidad >= moderado) return 'moderado'
+    if (probabilidad >= leve) return 'leve'
+    return 'marginal'
+  })()
+
+  const bar = getBarColor(nivel)
+  const textColor = getTextColor(nivel)
+  const label = NIVEL_LABELS[nivel]
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
       <div className="flex items-baseline justify-between mb-3">
         <h3 className="font-heading font-bold text-navy text-base">Confianza diagnóstica</h3>
         <motion.span
-          className={`font-mono font-bold text-2xl ${text}`}
+          className={`font-mono font-bold text-2xl ${textColor}`}
           initial={{ opacity: 0, scale: 0.8 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ delay: 0.4, type: 'spring' }}
@@ -47,27 +94,33 @@ export default function BarraFidelidad({ patologiaPrincipal, probabilidad, tiemp
             transition={{ duration: 1.2, ease: 'easeOut', delay: 0.2 }}
           />
         </div>
-        {/* Línea de umbral operativo (50%) */}
-        <div className="absolute top-0 bottom-0 flex flex-col items-center" style={{ left: '50%' }}>
+        {/* Líneas de umbral desde config */}
+        <div className="absolute top-0 bottom-0 flex flex-col items-center" style={{ left: `${nivelesConfig?.niveles_generales?.leve ? (nivelesConfig.niveles_generales.leve * 100) : 30}%` }}>
           <div className="w-0.5 h-6 bg-slate-400/60" />
         </div>
-        <div className="absolute top-7 text-[10px] font-mono text-slate-400" style={{ left: 'calc(50% - 28px)' }}>
-          umbral 50%
+        <div className="absolute top-7 text-[10px] font-mono text-slate-400" style={{ left: `${nivelesConfig?.niveles_generales?.leve ? (nivelesConfig.niveles_generales.leve * 100) : 30}%` }}>
+          umbral {Math.round((nivelesConfig?.niveles_generales?.leve || 0.30) * 100)}%
+        </div>
+        <div className="absolute top-0 bottom-0 flex flex-col items-center" style={{ left: `${nivelesConfig?.niveles_generales?.moderado ? (nivelesConfig.niveles_generales.moderado * 100) : 50}%` }}>
+          <div className="w-0.5 h-6 bg-slate-400/60" />
+        </div>
+        <div className="absolute top-7 text-[10px] font-mono text-slate-400" style={{ left: `${nivelesConfig?.niveles_generales?.moderado ? (nivelesConfig.niveles_generales.moderado * 100) : 50}%` }}>
+          umbral {Math.round((nivelesConfig?.niveles_generales?.moderado || 0.50) * 100)}%
         </div>
       </div>
 
       <div className="mt-8">
         <p className="font-body text-sm text-slate-600">
           Hallazgo principal:{' '}
-          <span className={`font-heading font-bold ${text}`}>{patologiaPrincipal}</span>
+          <span className={`font-heading font-bold ${textColor}`}>{patologiaPrincipal}</span>
           {' '}
-          <span className={`text-xs font-mono px-1.5 py-0.5 rounded ${text} bg-current/10`}>{label}</span>
+          <span className={`text-xs font-mono px-1.5 py-0.5 rounded ${getBgColor(nivel)}`}>{label}</span>
         </p>
       </div>
 
       <p className="mt-3 font-body text-xs text-slate-400 leading-relaxed border-t border-slate-100 pt-3">
         La confianza representa la probabilidad posterior calibrada del modelo ResNet-50
-        para el hallazgo de mayor relevancia. Umbral operativo: 50% (op_threshs del modelo).
+        para el hallazgo de mayor relevancia. Umbrales desde configuración centralizada.
         {tiempoInferencia && (
           <span className="font-mono"> · Inferencia: {tiempoInferencia}s</span>
         )}

@@ -2,6 +2,8 @@ import numpy as np
 import pydicom
 from PIL import Image as PILImage
 
+from django_ratelimit.decorators import ratelimit
+from django.utils.decorators import method_decorator
 from rest_framework.generics import RetrieveAPIView
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
@@ -11,9 +13,10 @@ from rest_framework import status
 from estudios.models import ImagenDICOM
 from .models import ResultadoCNN
 from .serializers import ResultadoCNNSerializer
-from .services import DetectorTorax, PATOLOGIAS_NEUMOLOGIA
+from .services import DetectorTorax, PATOLOGIAS_NEUMOLOGIA_BASELINE as PATOLOGIAS_NEUMOLOGIA
 
 
+@method_decorator(ratelimit(key="ip", rate="60/m", block=True), name="get")
 class ResultadoCNNView(RetrieveAPIView):
     serializer_class = ResultadoCNNSerializer
     permission_classes = [IsAuthenticated]
@@ -54,6 +57,7 @@ class ResultadoCNNView(RetrieveAPIView):
         return Response(data)
 
 
+@method_decorator(ratelimit(key="ip", rate="30/m", block=True), name="get")
 class GradCAMView(APIView):
     """
     GET /api/diagnostico/gradcam/?imagen_id=X&pathology=Pneumonia

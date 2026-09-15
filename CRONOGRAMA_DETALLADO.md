@@ -26,6 +26,7 @@
 | **Testing & Calidad** | ⏳ Pendiente | 10% | Solo tests vacíos |
 | **Gestión/Admin/Logging** | ⏳ Pendiente | 0% | Gap identificado en SDD |
 | **Despliegue/Entrega** | ⏳ Pendiente | 0% | Docker, CI/CD, docs |
+| **Fine-tuning CNN** | ⏳ Pendiente | 0% | NIH ChestX-ray14, RunPod A100, ResNet-50 |
 
 ---
 
@@ -148,11 +149,28 @@
 
 ---
 
+### **SEMANA 14-16 (Nov 23 - Dec 11) — FASE 7: FINE-TUNING CNN PROPIO (NUEVO)**
+
+| # | Tarea Específica | Entregable | Estado |
+|---|------------------|------------|--------|
+| 7.1 | Descarga NIH ChestX-ray14 (112k imágenes) + metadatos CSV | `data/nih/` + `Data_Entry_2017.csv` | ⏳ |
+| 7.2 | Preprocesamiento: resize 512x512, normalización [-1024,1024], splits train/val/test (70/15/15) | `data/nih/processed/` + `splits.json` | ⏳ |
+| 7.3 | DataLoader optimizado (num_workers, pin_memory, mixed precision) | `training/dataloaders.py` | ⏳ |
+| 7.4 | Modelo: ResNet-50 torchxrayvision + head nueva 14 clases neumológicas | `training/model.py` | ⏳ |
+| 7.5 | Entrenamiento: head-only (epochs 1-3) → partial unfreeze layer3-4 (epochs 4-10) en RunPod A100 | `training/train.py` + checkpoints | ⏳ |
+| 7.6 | Callbacks: EarlyStopping, ReduceLROnPlateau, ModelCheckpoint, WandB/TensorBoard | `training/callbacks.py` | ⏳ |
+| 7.7 | Evaluación: AUC-ROC, sensibilidad, especificidad, F1 por patología + matriz confusión | `training/evaluate.py` + `metrics.json` | ⏳ |
+| 7.8 | Comparativa baseline (preentrenado) vs fine-tuned en test set | `training/compare.py` + reporte | ⏳ |
+| 7.9 | Export checkpoint final `.pt` + integración en `DetectorTorax.cargar()` | `models/finetuned_resnet50_nih.pt` | ⏳ |
+| 7.10 | Dockerfile.training + scripts reproducibles + README.training.md | `Dockerfile.training`, `training/README.md` | ⏳ |
+
+---
+
 ## 📊 **VISTA SEMANAL RESUMIDA (GRÁFICO GANTT TEXTUAL)**
 
 ```
-SEMANA:    1  2  3  4  5  6  7  8  9  10 11 12 13
-          ── ── ── ── ── ── ── ── ── ── ── ── ──
+SEMANA:    1  2  3  4  5  6  7  8  9  10 11 12 13 14 15 16
+           ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ──
 FASE 0:    ██ ██
 FASE 1:       ██ ██
 FASE 2:          ██ ██
@@ -160,6 +178,7 @@ FASE 3:             ██ ██ ██
 FASE 4:                  ██ ██
 FASE 5:                       ██
 FASE 6:                           ██
+FASE 7:                                     ██ ██ ██
 ```
 
 ---
@@ -195,11 +214,12 @@ FASE 6:                           ██
 
 | Hito | Fecha Límite | % Proyecto | Estado |
 |------|--------------|------------|--------|
-| **MVP Core Funcional** | 21 Sep (Semana 4) | 55% | ✅ **YA ALCANZADO** |
-| **IA + Diagnóstico Completo** | 12 Oct (Semana 7) | 70% | ✅ **YA ALCANZADO** |
-| **Informes + Export** | 2 Nov (Semana 10) | 80% | 🔄 En curso (falta PDF/DICOM) |
-| **Gestión/Admin/Seguridad** | 16 Nov (Semana 12) | 90% | ⏳ Por iniciar |
-| **Testing + Docs + Deploy** | 20 Nov (Semana 13) | 100% | ⏳ Por iniciar |
+| **MVP Core Funcional** | 21 Sep (Semana 4) | 40% | ✅ **YA ALCANZADO** |
+| **IA + Diagnóstico Completo** | 12 Oct (Semana 7) | 55% | ✅ **YA ALCANZADO** |
+| **Informes + Export** | 2 Nov (Semana 10) | 65% | 🔄 En curso (falta PDF/DICOM) |
+| **Gestión/Admin/Seguridad** | 16 Nov (Semana 12) | 75% | ⏳ Por iniciar |
+| **Testing + Docs + Deploy** | 20 Nov (Semana 13) | 85% | ⏳ Por iniciar |
+| **Fine-tuning CNN propio** | 11 Dic (Semana 16) | 100% | ⏳ Por iniciar |
 
 ---
 
@@ -214,6 +234,7 @@ FASE 6:                           ██
 | **ADR-005** | SQLite dev / PostgreSQL prod (Docker) | Paridad dev-prod, cero config local |
 | **ADR-006** | Centralizar umbrales en backend (Single Source of Truth) | Elimina 5 duplicados frontend, consistencia clínica |
 | **ADR-007** | React 19 + Vite + Tailwind 4 (no TypeScript aún) | Velocidad dev, bundle pequeño, migración TS futura |
+| **ADR-008** | Fine-tuning ResNet-50 en NIH ChestX-ray14 (head + partial unfreeze) | Modelo propio validado en datos clínicos, mejor que baseline genérico |
 
 ---
 
@@ -228,6 +249,14 @@ FASE 6:                           ██
 
 ---
 
+## 🧠 **PRÓXIMOS PASOS FINE-TUNING (SEMANA 14-16, NOV 23 - DIC 11)**
+
+1. **Semana 14** → Descarga NIH + preprocesamiento + DataLoader + modelo head-only
+2. **Semana 15** → Entrenamiento RunPod A100 (head 3 epochs → unfreeze layer3-4 7 epochs)
+3. **Semana 16** → Evaluación métricas + comparativa baseline vs fine-tuned + integración + docs
+
+---
+
 **Documento generado:** 8 de septiembre de 2026  
-**Versión:** 1.0 — Basado en estado real del código (no plan teórico)  
+**Versión:** 1.1 — Agregada Fase 7 Fine-tuning CNN  
 **Responsable:** [Tu Nombre] — Proyecto de Grado Neo RX

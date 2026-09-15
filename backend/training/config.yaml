@@ -1,0 +1,76 @@
+# Neo RX Fine-tuning Configuration
+# All hyperparameters and paths for training on NIH ChestX-ray14
+
+data:
+  data_dir: "data/nih"              # Root directory with images/ and Data_Entry_2017.csv
+  splits_json: "data/nih/splits.json"  # Patient-level train/val/test splits
+  processed_dir: "data/nih/processed"  # Optional preprocessed cache (not used in v1)
+
+model:
+  base_weights: "resnet50-res512-all"  # torchxrayvision pretrained weights
+  num_classes: 14                      # NIH 14 labels
+  checkpoint_dir: "checkpoints"
+  checkpoint_name: "finetuned_resnet50_nih.pt"
+
+train:
+  epochs_head: 3                       # Head-only training epochs
+  epochs_finetune: 7                   # Partial unfreeze training epochs
+  lr_head: 1.0e-3                      # Learning rate for head-only phase
+  lr_finetune: 1.0e-4                  # Learning rate for partial unfreeze phase
+  weight_decay: 1.0e-4
+  batch_size: 32
+  num_workers: 8
+  mixed_precision: true
+  early_stopping_patience: 4
+  grad_clip: 1.0
+  seed: 42
+  log_dir: "runs"
+
+# NIH ChestX-ray14 labels (fixed order - must match dataset.py)
+nih_labels:
+  - "Atelectasis"
+  - "Cardiomegaly"
+  - "Consolidation"
+  - "Edema"
+  - "Emphysema"
+  - "Effusion"
+  - "Fibrosis"
+  - "Hernia"
+  - "Infiltration"
+  - "Mass"
+  - "Nodule"
+  - "Pleural_Thickening"
+  - "Pneumonia"
+  - "Pneumothorax"
+
+# English to Spanish mapping for clinical output
+labels_es:
+  Atelectasis: "Atelectasia"
+  Cardiomegaly: "Cardiomegalia"
+  Consolidation: "Consolidación"
+  Edema: "Edema pulmonar"
+  Emphysema: "Enfisema"
+  Effusion: "Derrame pleural"
+  Fibrosis: "Fibrosis pulmonar"
+  Hernia: "Hernia"
+  Infiltration: "Infiltrado pulmonar"
+  Mass: "Masa pulmonar"
+  Nodule: "Nódulo pulmonar"
+  Pleural_Thickening: "Engrosamiento pleural"
+  Pneumonia: "Neumonía"
+  Pneumothorax: "Neumotórax"
+
+# Pulmonary-only labels (excludes cardiology/other)
+pulmonary_labels:
+  - "Atelectasis"
+  - "Consolidation"
+  - "Edema"
+  - "Emphysema"
+  - "Effusion"
+  - "Fibrosis"
+  - "Infiltration"
+  - "Mass"
+  - "Nodule"
+  - "Pleural_Thickening"
+  - "Pneumonia"
+  - "Pneumothorax"

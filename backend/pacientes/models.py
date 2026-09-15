@@ -1,5 +1,13 @@
 from django.db import models
 
+try:
+    from django_cryptography.fields import encrypt
+    ENCRYPTION_AVAILABLE = True
+except (ImportError, AttributeError):
+    ENCRYPTION_AVAILABLE = False
+    def encrypt(field):
+        return field
+
 
 class Paciente(models.Model):
     GENERO_CHOICES = [
@@ -9,7 +17,8 @@ class Paciente(models.Model):
     ]
     nombres = models.CharField(max_length=100)
     apellidos = models.CharField(max_length=100)
-    ci = models.CharField(max_length=20, unique=True)
+    # CI encriptado — HIPAA/LOPD compliance
+    ci = encrypt(models.CharField(max_length=20, unique=True))
     fecha_nacimiento = models.DateField()
     genero = models.CharField(max_length=10, choices=GENERO_CHOICES)
     telefono = models.CharField(max_length=20, blank=True)

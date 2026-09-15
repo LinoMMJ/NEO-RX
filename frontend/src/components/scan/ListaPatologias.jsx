@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import { ShieldCheck } from 'lucide-react'
+import { api } from '../../api'
 
 // Descripciones clínicas para tooltip hover
 const DESCRIPCIONES = {
@@ -25,22 +26,65 @@ const DESCRIPCIONES = {
   'Masa pulmonar':         { en: 'Mass',               desc: 'Opacidad redondeada ≥ 3 cm; alta sospecha de neoplasia primaria o metástasis' },
 }
 
-function getBadge(prob) {
-  if (prob >= 0.70) return { label: 'CRÍTICO',  cls: 'bg-danger/15 text-danger border-danger/30' }
-  if (prob >= 0.40) return { label: 'MODERADO', cls: 'bg-orange-500/15 text-orange-500 border-orange-500/30' }
-  if (prob >= 0.20) return { label: 'LEVE',     cls: 'bg-warning/15 text-warning border-warning/30' }
-  return               { label: 'MARGINAL', cls: 'bg-slate-500/15 text-slate-500 border-slate-500/30' }
+const NIVEL_LABELS = {
+  alto: 'Alto',
+  moderado: 'Moderado',
+  leve: 'Leve',
+  marginal: 'No significativo',
 }
 
-function getBarColor(prob) {
-  if (prob >= 0.70) return 'from-danger to-rose-400'
-  if (prob >= 0.40) return 'from-orange-400 to-orange-500'
-  if (prob >= 0.20) return 'from-warning to-amber-400'
-  return 'from-slate-400 to-slate-500'
+const NIVEL_COLORS = {
+  alto: 'danger',
+  moderado: 'orange',
+  leve: 'warning',
+  marginal: 'slate',
+}
+
+function getBadge(nivel) {
+  switch (nivel) {
+    case 'alto':      return { label: 'ALTO',       cls: 'bg-danger/15 text-danger border-danger/30' }
+    case 'moderado':  return { label: 'MODERADO',   cls: 'bg-orange-500/15 text-orange-500 border-orange-500/30' }
+    case 'leve':      return { label: 'LEVE',       cls: 'bg-warning/15 text-warning border-warning/30' }
+    default:          return { label: 'MARGINAL',   cls: 'bg-slate-500/15 text-slate-500 border-slate-500/30' }
+  }
+}
+
+function getBarColor(nivel) {
+  switch (nivel) {
+    case 'alto':      return 'from-danger to-rose-400'
+    case 'moderado':  return 'from-orange-400 to-orange-500'
+    case 'leve':      return 'from-warning to-amber-400'
+    default:          return 'from-slate-400 to-slate-500'
+  }
 }
 
 export default function ListaPatologias({ patologias }) {
   const [tooltip, setTooltip] = useState(null)
+  const [nivelesConfig, setNivelesConfig] = useState(null)
+
+  // Cargar configuración de niveles desde backend (una sola vez)
+  useEffect(() => {
+    api.get('/diagnostico/niveles-clinicos/')
+      .then(res => setNivelesConfig(res.data))
+      .catch(err => console.warn('[ListaPatologias] No se pudo cargar niveles clínicos, usando defaults:', err))
+  }, [])
+
+  // Función para clasificar usando backend config o fallback local
+  const clasificar = useCallback((prob) => {
+    if (!nivelesConfig) {
+      // Fallback local (debe coincidir con backend/niveles.py)
+      if (prob >= 0.65) return 'alto'
+      if (prob >= 0.40) return 'moderado'
+      if (prob >= 0.20) return 'leve'
+      return 'marginal'
+    }
+    // Usar umbrales generales del config
+    const { alto, moderado, leve } = nivelesConfig.niveles_generales
+    if (prob >= alto) return 'alto'
+    if (prob >= moderado) return 'moderado'
+    if (prob >= leve) return 'leve'
+    return 'marginal'
+  }, [nivelesConfig])
 
   // Solo mostrar > 5%
   const lista = patologias ? Object.entries(patologias).filter(([, p]) => p >= 0.05) : []
@@ -70,8 +114,9 @@ export default function ListaPatologias({ patologias }) {
       <div className="space-y-3">
         {lista.map(([nombre, prob], i) => {
           const pct = Math.round(prob * 100)
-          const badge = getBadge(prob)
-          const bar = getBarColor(prob)
+          const nivel = clasificar(prob)
+          const badge = getBadge(nivel)
+          const bar = getBarColor(nivel)
           const info = DESCRIPCIONES[nombre]
 
           return (
@@ -86,8 +131,8 @@ export default function ListaPatologias({ patologias }) {
             >
               <div className="flex items-center gap-2 mb-1">
                 <span className="font-body text-sm font-semibold text-navy flex-1">{nombre}</span>
-                <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border ${badge.cls} ${prob >= 0.70 ? 'animate-pulse' : ''}`}>
-                  {badge.label}
+                <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border ${badge.cls} ${nivel === 'alto' ? 'animate-pulse' : ''}`}>
+                  {NIVEL_LABELS[nivel]}
                 </span>
                 <span className="font-mono text-sm font-bold text-slate-700 w-12 text-right">{pct}%</span>
               </div>
@@ -118,7 +163,7 @@ export default function ListaPatologias({ patologias }) {
 
       <p className="font-body text-xs text-slate-400 mt-4 border-t border-slate-100 pt-3">
         Pasa el cursor sobre cada hallazgo para ver la descripción clínica.
-        Ordenados por probabilidad descendente.
+        Ordenados por probabilidad descendente. Niveles desde backend centralizado.
       </p>
     </div>
   )

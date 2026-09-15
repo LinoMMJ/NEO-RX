@@ -1,6 +1,20 @@
+"""
+Views para Informes Clínicos — Generación, Firma, Export PDF y DICOM SR.
+
+Endpoints:
+- POST   /api/informes/generar/          → Genera borrador automático desde CNN
+- GET    /api/informes/<pk>/             → Detalle / edición de borrador
+- PUT    /api/informes/<pk>/             → Actualiza hallazgos/impresión/recomendaciones
+- POST   /api/informes/<pk>/firmar/      → Firma (solo rol=medico)
+- GET    /api/informes/<pk>/pdf/         → Export PDF (weasyprint)
+- GET    /api/informes/<pk>/dicom-sr/    → Export DICOM SR (Basic Text SR)
+"""
+
 from datetime import datetime
 from io import BytesIO
 
+from django_ratelimit.decorators import ratelimit
+from django.utils.decorators import method_decorator
 from django.http import FileResponse
 from django.template.loader import render_to_string
 from rest_framework.views import APIView
@@ -15,6 +29,10 @@ from diagnostico.models import ResultadoCNN
 from .models import InformePreliminar
 from .serializers import InformePreliminarSerializer
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# GENERADORES DE TEXTO CLÍNICO
+# ──────────────────────────────────────────────────────────────────────────────
 
 # NOTA: las claves coinciden EXACTAMENTE con services.PATOLOGIAS_NEUMOLOGIA
 # (sin acentos): "Neumonia", "Consolidacion", "Nodulo", "Neumotorax", etc.
@@ -150,6 +168,11 @@ def generar_recomendaciones(resultado_cnn):
     return "Control según criterio clínico. Sin hallazgos que requieran seguimiento urgente."
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# ENDPOINTS: GENERACIÓN, EDICIÓN, FIRMA
+# ──────────────────────────────────────────────────────────────────────────────
+
+@method_decorator(ratelimit(key="ip", rate="20/m", block=True), name="post")
 class GenerarInformeView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -198,6 +221,8 @@ class GenerarInformeView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
+@method_decorator(ratelimit(key="ip", rate="60/m", block=True), name="get")
+@method_decorator(ratelimit(key="ip", rate="20/m", block=True), name="put")
 class InformePreliminarDetailView(RetrieveUpdateAPIView):
     queryset = InformePreliminar.objects.all()
     serializer_class = InformePreliminarSerializer
@@ -220,18 +245,34 @@ class InformePreliminarDetailView(RetrieveUpdateAPIView):
         serializer.save(**extra)
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# ENDPOINTS: EXPORT PDF (weasyprint)
+# ──────────────────────────────────────────────────────────────────────────────
+
+@method_decorator(ratelimit(key="ip", rate="10/m", block=True), name="get")
 class DescargarInformePDFView(APIView):
-    """GET /api/informes/<pk>/descargar/ — genera y descarga el informe como PDF."""
+    """
+    GET /api/informes/<pk>/pdf/ — genera y descarga el informe como PDF (weasyprint).
+
+    Solo disponible para informes en estado 'firmado'.
+    """
     permission_classes = [IsAuthenticated]
 
     def get(self, request, pk):
+        # Try weasyprint first (better CSS support), fallback to xhtml2pdf
+        pdf_engine = None
         try:
-            from xhtml2pdf import pisa
+            from weasyprint import HTML
+            pdf_engine = "weasyprint"
         except ImportError:
-            return Response(
-                {"error": "xhtml2pdf no instalado. Ejecuta: pip install xhtml2pdf"},
-                status=status.HTTP_501_NOT_IMPLEMENTED,
-            )
+            try:
+                from xhtml2pdf import pisa
+                pdf_engine = "xhtml2pdf"
+            except ImportError:
+                return Response(
+                    {"error": "Ni weasyprint ni xhtml2pdf instalados. Ejecuta: pip install weasyprint"},
+                    status=status.HTTP_501_NOT_IMPLEMENTED,
+                )
 
         try:
             informe = InformePreliminar.objects.select_related(
@@ -252,32 +293,286 @@ class DescargarInformePDFView(APIView):
             hoy.year - paciente.fecha_nacimiento.year
             - ((hoy.month, hoy.day) < (paciente.fecha_nacimiento.month, paciente.fecha_nacimiento.day))
         )
+        medico_nombre = informe.medico.get_full_name() if informe.medico else None
+        fecha_firmado = informe.fecha_firmado.strftime("%d/%m/%Y %H:%M") if informe.fecha_firmado else None
 
         contexto = {
             "informe": informe,
             "estudio": informe.estudio,
             "paciente": paciente,
             "medico": informe.medico,
+            "medico_nombre": medico_nombre,
             "edad": edad,
             "fecha_hoy": hoy.strftime("%d/%m/%Y"),
+            "estudio_fecha": informe.estudio.fecha.strftime("%d/%m/%Y"),
+            "fecha_firmado": fecha_firmado,
         }
+
         try:
             html_string = render_to_string("informes/informe_pdf.html", contexto)
-            pdf_bytes = BytesIO()
-            result = pisa.CreatePDF(html_string, dest=pdf_bytes)
-            if result.err:
-                return Response(
-                    {"error": f"Error al renderizar el PDF ({result.err} errores de formato)."},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                )
+
+            if pdf_engine == "weasyprint":
+                from weasyprint import HTML
+                pdf_bytes = BytesIO()
+                HTML(string=html_string, base_url=request.build_absolute_uri('/')).write_pdf(pdf_bytes)
+            else:
+                from xhtml2pdf import pisa
+                pdf_bytes = BytesIO()
+                result = pisa.CreatePDF(html_string, dest=pdf_bytes)
+                if result.err:
+                    return Response(
+                        {"error": f"Error al renderizar el PDF ({result.err} errores de formato)."},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    )
+
+            pdf_bytes.seek(0)
         except Exception as exc:
             return Response(
                 {"error": f"Error al generar el PDF: {exc}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-        pdf_bytes.seek(0)
 
         filename = f"Informe_{paciente.ci}_{informe.estudio.id}.pdf"
         response = FileResponse(pdf_bytes, content_type="application/pdf")
         response["Content-Disposition"] = f'attachment; filename="{filename}"'
         return response
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# ENDPOINTS: EXPORT DICOM SR (Basic Text SR)
+# ──────────────────────────────────────────────────────────────────────────────
+
+@method_decorator(ratelimit(key="ip", rate="10/m", block=True), name="get")
+class DescargarInformeDICOMSRView(APIView):
+    """
+    GET /api/informes/<pk>/dicom-sr/ — genera y descarga Structured Report DICOM (Basic Text SR).
+
+    Cumple con DICOM PS3.16 (Structured Reporting) — Basic Text SR IOD.
+    Incluye: Patient Module, Study Module, SR Document Series/Document Modules,
+    y Content Tree con hallazgos, impresión y recomendaciones.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            import pydicom
+            from pydicom.uid import (
+                generate_uid, ExplicitVRLittleEndian,
+                BasicTextSRStorage, VerificationSOPClass
+            )
+            from pydicom.dataset import Dataset
+            from pydicom.sequence import Sequence
+            from pydicom.valuerep import PersonName
+        except ImportError:
+            return Response(
+                {"error": "pydicom no instalado. Ejecuta: pip install pydicom"},
+                status=status.HTTP_501_NOT_IMPLEMENTED,
+            )
+
+        try:
+            informe = InformePreliminar.objects.select_related(
+                "estudio__paciente", "medico", "estudio__paciente"
+            ).get(pk=pk)
+        except InformePreliminar.DoesNotExist:
+            return Response({"error": "Informe no encontrado."}, status=status.HTTP_404_NOT_FOUND)
+
+        if informe.estado != "firmado":
+            return Response(
+                {"error": "Solo se pueden exportar informes firmados."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # ──────────────────────────────────────────────────────────────────────
+        # BUILD DICOM SR DATASET
+        # ──────────────────────────────────────────────────────────────────────
+
+        ds = Dataset()
+        ds.file_meta = Dataset()
+
+        # File Meta Information
+        ds.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+        ds.file_meta.MediaStorageSOPClassUID = BasicTextSRStorage
+        ds.file_meta.MediaStorageSOPInstanceUID = generate_uid()
+        ds.file_meta.ImplementationClassUID = generate_uid()
+        ds.file_meta.ImplementationVersionName = "NEORX_SR_1.0"
+
+        # ───── SOP Common Module ─────
+        ds.SOPClassUID = BasicTextSRStorage
+        ds.SOPInstanceUID = generate_uid()
+
+        # ───── Patient Module ─────
+        paciente = informe.estudio.paciente
+        ds.PatientName = PersonName(f"{paciente.apellidos}^{paciente.nombres}")
+        ds.PatientID = paciente.ci
+        ds.PatientBirthDate = paciente.fecha_nacimiento.strftime("%Y%m%d")
+        ds.PatientSex = paciente.genero[0].upper() if paciente.genero else "O"
+
+        # ───── General Study Module ─────
+        ds.StudyInstanceUID = generate_uid()  # En producción: usar UID real del estudio
+        ds.StudyDate = informe.estudio.fecha.strftime("%Y%m%d")
+        ds.StudyTime = datetime.now().strftime("%H%M%S")
+        ds.ReferringPhysicianName = PersonName("")
+        ds.StudyID = str(informe.estudio.id)
+        ds.AccessionNumber = str(informe.estudio.id)
+
+        # ───── SR Document Series Module ─────
+        ds.Modality = "SR"
+        ds.SeriesInstanceUID = generate_uid()
+        ds.SeriesNumber = 1
+        ds.SeriesDate = datetime.now().strftime("%Y%m%d")
+        ds.SeriesTime = datetime.now().strftime("%H%M%S")
+
+        # ───── General Equipment Module ─────
+        ds.Manufacturer = "Neo Rayos X Digital"
+        ds.ManufacturerModelName = "Neo RX AI Assistant"
+        ds.DeviceSerialNumber = "NEORX-001"
+        ds.SoftwareVersions = "1.0"
+
+        # ───── SR Document General Module ─────
+        ds.InstanceNumber = 1
+        ds.CompletionFlag = "COMPLETE"
+        ds.VerificationFlag = "UNVERIFIED"  # Cambiar a VERIFIED si se desea
+        ds.ContentDate = datetime.now().strftime("%Y%m%d")
+        ds.ContentTime = datetime.now().strftime("%H%M%S")
+
+        # Verifying Observer (médico firmante)
+        if informe.medico:
+            vo_seq = Sequence()
+            vo_item = Dataset()
+            vo_item.PersonName = PersonName(informe.medico.get_full_name())
+            vo_item.VerificationDateTime = informe.fecha_firmado.strftime("%Y%m%d%H%M%S") if informe.fecha_firmado else datetime.now().strftime("%Y%m%d%H%M%S")
+            vo_seq.append(vo_item)
+            ds.VerifyingObserverSequence = vo_seq
+
+        # ───── SR Document Content Module ─────
+        # Content Template: TID 2000 (Basic Text SR)
+        content_seq = Sequence()
+
+        # CONTAINER: Root
+        root = Dataset()
+        root.ValueType = "CONTAINER"
+        root.ConceptNameCodeSequence = Sequence([self._code_item("113000", "DCM", "Radiology Report")])
+        root.ContinuityOfContent = "SEPARATE"
+        root.ContentSequence = Sequence()
+
+        # ─── 1. Clinical Context ───
+        clinical_context = self._make_container(
+            "121005", "DCM", "Clinical Context",
+            children=[
+                self._text_item("121006", "DCM", "Clinical History", f"Radiografía de tórax rutinaria. Centro: Neo Rayos X Digital, La Paz, Bolivia."),
+                self._text_item("121007", "DCM", "Reason for Exam", "Control radiológico / Sintomatología respiratoria"),
+            ]
+        )
+        root.ContentSequence.append(clinical_context)
+
+        # ─── 2. Technique ───
+        technique = self._make_container(
+            "121008", "DCM", "Technique",
+            children=[
+                self._text_item("121009", "DCM", "Technique Description", informe.tecnica),
+                self._text_item("121010", "DCM", "Image Quality", "Adecuada" if getattr(informe.estudio.imagenes.first(), 'es_nitida', True) else "Limitada por borrosidad"),
+            ]
+        )
+        root.ContentSequence.append(technique)
+
+        # ─── 3. Findings ───
+        findings_container = self._make_container(
+            "121000", "DCM", "Findings",
+            children=[
+                self._text_item("121001", "DCM", "Findings", informe.hallazgos or "Sin hallazgos significativos."),
+            ]
+        )
+        root.ContentSequence.append(findings_container)
+
+        # ─── 4. Impression ───
+        impression = self._make_container(
+            "121002", "DCM", "Impression",
+            children=[
+                self._text_item("121003", "DCM", "Impression", informe.impresion or "Sin impresión diagnóstica."),
+            ]
+        )
+        root.ContentSequence.append(impression)
+
+        # ─── 5. Recommendations ───
+        recommendations = self._make_container(
+            "121004", "DCM", "Recommendations",
+            children=[
+                self._text_item("121005", "DCM", "Recommendations", informe.recomendaciones or "Control según criterio clínico."),
+            ]
+        )
+        root.ContentSequence.append(recommendations)
+
+        # ─── 6. AI Assistant Metadata ───
+        ai_meta = self._make_container(
+            "113001", "DCM", "AI Assistant Metadata",
+            children=[
+                self._text_item("113002", "DCM", "AI System", "Neo RX CNN ResNet-50 (torchxrayvision)"),
+                self._text_item("113003", "DCM", "AI Version", "1.0"),
+                self._text_item("113004", "DCM", "AI Role", "Decision Support (no autonomous diagnosis)"),
+                self._text_item("113005", "DCM", "Disclaimer", "Este informe es preliminar. Requiere validación y firma del médico radiólogo según Ley 3131."),
+            ]
+        )
+        root.ContentSequence.append(ai_meta)
+
+        ds.ContentSequence = root.ContentSequence
+
+        # ───── Save to BytesIO ─────
+        from pydicom.filebase import DicomBytesIO
+        buffer = DicomBytesIO()
+        ds.save_as(buffer, write_like_original=False)
+        buffer.seek(0)
+
+        filename = f"SR_{paciente.ci}_{informe.estudio.id}.dcm"
+        response = FileResponse(buffer, content_type="application/dicom")
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return Response(response.getvalue(), content_type="application/dicom", headers={
+            "Content-Disposition": f'attachment; filename="{filename}"'
+        })
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # HELPERS para DICOM SR
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _code_item(self, code_value, coding_scheme, code_meaning):
+        """Crea un item Code Sequence (CODE)."""
+        from pydicom.dataset import Dataset
+        item = Dataset()
+        item.CodeValue = code_value
+        item.CodingSchemeDesignator = coding_scheme
+        item.CodeMeaning = code_meaning
+        return item
+
+    def _text_item(self, code_value, coding_scheme, code_meaning, text_value):
+        """Crea un item TEXT con concept name."""
+        from pydicom.dataset import Dataset
+        from pydicom.sequence import Sequence
+        item = Dataset()
+        item.ValueType = "TEXT"
+        item.ConceptNameCodeSequence = Sequence([self._code_item(code_value, coding_scheme, code_meaning)])
+        item.TextValue = text_value
+        item.RelationshipType = "CONTAINS"
+        return item
+
+    def _make_container(self, code_value, coding_scheme, code_meaning, children):
+        """Crea un item CONTAINER con hijos."""
+        from pydicom.dataset import Dataset
+        from pydicom.sequence import Sequence
+        item = Dataset()
+        item.ValueType = "CONTAINER"
+        item.ConceptNameCodeSequence = Sequence([self._code_item(code_value, coding_scheme, code_meaning)])
+        item.ContinuityOfContent = "SEPARATE"
+        item.ContentSequence = Sequence(children)
+        item.RelationshipType = "CONTAINS"
+        return item
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# EXPORT: Todas las vistas
+# ──────────────────────────────────────────────────────────────────────────────
+
+__all__ = [
+    "GenerarInformeView",
+    "InformePreliminarDetailView",
+    "DescargarInformePDFView",
+    "DescargarInformeDICOMSRView",
+]

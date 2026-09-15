@@ -1,152 +1,287 @@
+{% load static %}
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8">
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: Helvetica, Arial, sans-serif;
-      font-size: 10.5pt;
-      line-height: 1.55;
-      color: #1a2236;
-    }
-    .header {
-      text-align: center;
-      border-bottom: 2.5px solid #0b4f8a;
-      padding-bottom: 12px;
-      margin-bottom: 20px;
-    }
-    .logo { font-size: 17pt; font-weight: bold; color: #0b4f8a; letter-spacing: 1px; }
-    .subtitulo { font-size: 9pt; color: #546e8a; margin-top: 4px; }
-
-    .ficha {
-      background: #f0f6ff;
-      border: 1px solid #c8ddf5;
-      padding: 10px 14px;
-      margin-bottom: 18px;
-      font-size: 9.5pt;
-      width: 100%;
-    }
-    .ficha table { width: 100%; border-collapse: collapse; }
-    .ficha td { padding: 3px 12px 3px 0; vertical-align: top; }
-    .ficha span { color: #546e8a; }
-    .ficha strong { color: #1a2236; }
-
-    .seccion { margin-bottom: 14px; page-break-inside: avoid; }
-    .seccion-titulo {
-      background: #0b4f8a;
-      color: #fff;
-      padding: 4px 10px;
-      font-weight: bold;
-      font-size: 9.5pt;
-      letter-spacing: 0.5px;
-      margin-bottom: 7px;
-      border-left: 4px solid #073a6b;
-    }
-    .seccion-contenido {
-      padding: 0 10px;
-      text-align: justify;
-      font-size: 9.5pt;
-      white-space: pre-wrap;
-    }
-
-    .firma-bloque {
-      margin-top: 28px;
-      border-top: 1.5px solid #bcc8d4;
-      padding-top: 14px;
-      width: 100%;
-    }
-    .firma-bloque table { width: 100%; border-collapse: collapse; }
-    .firma-item { text-align: center; width: 48%; }
-    .firma-linea {
-      border-bottom: 1px solid #546e8a;
-      width: 80%;
-      margin: 0 auto 4px;
-      height: 28px;
-    }
-    .firma-label { font-size: 8.5pt; color: #546e8a; }
-
-    .footer {
-      text-align: center;
-      font-size: 8pt;
-      color: #8fa4b8;
-      margin-top: 36px;
-      border-top: 1px solid #dde4ec;
-      padding-top: 8px;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <title>Informe Radiológico - {{ paciente.ci }}</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 2cm 2.5cm;
+            @top-center {
+                content: "NEO RAYOS X DIGITAL - Informe Preliminar de Radiografía de Tórax";
+                font-family: 'DejaVu Sans', sans-serif;
+                font-size: 9pt;
+                color: #333;
+            }
+            @bottom-center {
+                content: "Página " counter(page) " de " counter(pages);
+                font-family: 'DejaVu Sans', sans-serif;
+                font-size: 8pt;
+                color: #666;
+            }
+        }
+        * { box-sizing: border-box; }
+        body {
+            font-family: 'DejaVu Sans', 'Helvetica Neue', Arial, sans-serif;
+            font-size: 11pt;
+            line-height: 1.5;
+            color: #222;
+            margin: 0;
+            padding: 0;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            border-bottom: 2px solid #1e3a5f;
+            padding-bottom: 12px;
+            margin-bottom: 20px;
+        }
+        .logo-section {
+            flex: 1;
+        }
+        .logo-title {
+            font-size: 18pt;
+            font-weight: 700;
+            color: #1e3a5f;
+            margin: 0;
+        }
+        .logo-subtitle {
+            font-size: 10pt;
+            color: #555;
+            margin: 2px 0 0;
+        }
+        .info-section {
+            flex: 1;
+            text-align: right;
+        }
+        .info-label {
+            font-size: 8pt;
+            text-transform: uppercase;
+            color: #888;
+            letter-spacing: 0.5px;
+        }
+        .info-value {
+            font-size: 11pt;
+            font-weight: 600;
+            color: #222;
+        }
+        .patient-card {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 20px;
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+        }
+        .patient-field {
+            display: flex;
+            flex-direction: column;
+        }
+        .patient-field .label {
+            font-size: 7.5pt;
+            text-transform: uppercase;
+            color: #64748b;
+            letter-spacing: 0.5px;
+        }
+        .patient-field .value {
+            font-size: 10.5pt;
+            font-weight: 600;
+            color: #1e293b;
+        }
+        .section {
+            margin-bottom: 20px;
+        }
+        .section-title {
+            font-size: 11pt;
+            font-weight: 700;
+            color: #1e3a5f;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid #e2e8f0;
+            padding-bottom: 6px;
+            margin-bottom: 12px;
+        }
+        .section-content {
+            white-space: pre-wrap;
+            font-size: 10.5pt;
+            line-height: 1.6;
+            color: #334155;
+        }
+        .findings-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+        .finding-item {
+            background: #f8fafc;
+            border-left: 3px solid #1e3a5f;
+            padding: 10px 14px;
+            border-radius: 0 6px 6px 0;
+        }
+        .finding-label {
+            font-size: 8.5pt;
+            font-weight: 700;
+            color: #1e3a5f;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+        .finding-text {
+            font-size: 10pt;
+            color: #334155;
+        }
+        .signature-block {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #cbd5e1;
+            display: flex;
+            justify-content: space-between;
+        }
+        .signature-box {
+            text-align: center;
+            width: 45%;
+        }
+        .signature-line {
+            border-top: 1px solid #334155;
+            width: 100%;
+            margin-top: 40px;
+            padding-top: 6px;
+        }
+        .signature-name {
+            font-weight: 600;
+            font-size: 10pt;
+            color: #1e293b;
+        }
+        .signature-role {
+            font-size: 8.5pt;
+            color: #64748b;
+        }
+        .signature-date {
+            font-size: 8.5pt;
+            color: #64748b;
+            margin-top: 4px;
+        }
+        .disclaimer {
+            margin-top: 30px;
+            padding: 12px;
+            background: #fef3c7;
+            border: 1px solid #fcd34d;
+            border-radius: 6px;
+            font-size: 8.5pt;
+            color: #92400e;
+            line-height: 1.5;
+        }
+        .watermark {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            opacity: 0.05;
+            font-size: 72pt;
+            font-weight: 700;
+            color: #1e3a5f;
+            transform: rotate(-15deg);
+            pointer-events: none;
+            z-index: -1;
+        }
+        .page-break { page-break-before: always; }
+        @media print {
+            .no-print { display: none; }
+        }
+    </style>
 </head>
 <body>
+    <div class="watermark">NEO RX</div>
 
-  <div class="header">
-    <div class="logo">NEO RAYOS X DIGITAL</div>
-    <div class="subtitulo">Centro de Diagnóstico Radiológico Asistido por Inteligencia Artificial · La Paz, Bolivia</div>
-    <div class="subtitulo" style="margin-top:3px; font-weight:bold; color:#0b4f8a;">INFORME RADIOLÓGICO PRELIMINAR</div>
-  </div>
+    <!-- HEADER -->
+    <div class="header">
+        <div class="logo-section">
+            <h1 class="logo-title">NEO RAYOS X DIGITAL</h1>
+            <p class="logo-subtitle">Centro de Diagnóstico por Imagen · La Paz, Bolivia</p>
+            <p class="logo-subtitle">Av. Arce Nº 2145 · Tel: +591 2 24XXXXX</p>
+        </div>
+        <div class="info-section">
+            <div class="info-label">Informe Nº</div>
+            <div class="info-value">{{ informe.id }}</div>
+            <div class="info-label" style="margin-top: 8px;">Fecha</div>
+            <div class="info-value">{{ fecha_hoy }}</div>
+            <div class="info-label" style="margin-top: 8px;">Estado</div>
+            <div class="info-value" style="text-transform: capitalize;">{{ informe.get_estado_display }}</div>
+        </div>
+    </div>
 
-  <div class="ficha">
-    <table>
-      <tr>
-        <td><span>Paciente: </span><strong>{{ paciente.nombres }} {{ paciente.apellidos }}</strong></td>
-        <td><span>CI: </span><strong>{{ paciente.ci }}</strong></td>
-        <td><span>Edad: </span><strong>{{ edad }} años</strong></td>
-        <td><span>Género: </span><strong>{{ paciente.get_genero_display }}</strong></td>
-      </tr>
-      <tr>
-        <td><span>Fecha nacimiento: </span><strong>{{ paciente.fecha_nacimiento|date:"d/m/Y" }}</strong></td>
-        <td><span>Nro. Estudio: </span><strong>#{{ estudio.id }}</strong></td>
-        <td><span>Fecha estudio: </span><strong>{{ estudio.fecha|date:"d/m/Y" }}</strong></td>
-        <td><span>Fecha informe: </span><strong>{{ fecha_hoy }}</strong></td>
-      </tr>
-    </table>
-  </div>
+    <!-- DATOS DEL PACIENTE -->
+    <div class="patient-card">
+        <div class="patient-field">
+            <span class="label">Paciente</span>
+            <span class="value">{{ paciente.nombres }} {{ paciente.apellidos }}</span>
+        </div>
+        <div class="patient-field">
+            <span class="label">CI</span>
+            <span class="value">{{ paciente.ci }}</span>
+        </div>
+        <div class="patient-field">
+            <span class="label">Edad / Género</span>
+            <span class="value">{{ edad }} años / {{ paciente.get_genero_display }}</span>
+        </div>
+        <div class="patient-field">
+            <span class="label">Fecha Estudio</span>
+            <span class="value">{{ estudio_fecha|date:"d/m/Y" }}</span>
+        </div>
+    </div>
 
-  <div class="seccion">
-    <div class="seccion-titulo">TÉCNICA</div>
-    <div class="seccion-contenido">{{ informe.tecnica }}</div>
-  </div>
+    <!-- TÉCNICA -->
+    <div class="section">
+        <h2 class="section-title">TÉCNICA</h2>
+        <div class="section-content">{{ informe.tecnica }}</div>
+    </div>
 
-  <div class="seccion">
-    <div class="seccion-titulo">HALLAZGOS RADIOLÓGICOS</div>
-    <div class="seccion-contenido">{{ informe.hallazgos }}</div>
-  </div>
+    <!-- HALLAZGOS -->
+    <div class="section">
+        <h2 class="section-title">HALLAZGOS</h2>
+        <div class="section-content">{{ informe.hallazgos }}</div>
+    </div>
 
-  <div class="seccion">
-    <div class="seccion-titulo">IMPRESIÓN DIAGNÓSTICA</div>
-    <div class="seccion-contenido">{{ informe.impresion }}</div>
-  </div>
+    <!-- IMPRESIÓN DIAGNÓSTICA -->
+    <div class="section">
+        <h2 class="section-title">IMPRESIÓN DIAGNÓSTICA</h2>
+        <div class="section-content">{{ informe.impresion }}</div>
+    </div>
 
-  <div class="seccion">
-    <div class="seccion-titulo">RECOMENDACIONES</div>
-    <div class="seccion-contenido">{{ informe.recomendaciones }}</div>
-  </div>
+    <!-- RECOMENDACIONES -->
+    <div class="section">
+        <h2 class="section-title">RECOMENDACIONES</h2>
+        <div class="section-content">{{ informe.recomendaciones }}</div>
+    </div>
 
-  <div class="firma-bloque">
-    <table>
-      <tr>
-        <td class="firma-item">
-          <div class="firma-linea"></div>
-          <p class="firma-label">
-            {% if medico %}{{ medico.get_full_name }}{% else %}Médico Radiólogo{% endif %}
-          </p>
-          <p class="firma-label">Médico Radiólogo Especialista</p>
-        </td>
-        <td class="firma-item">
-          <div class="firma-linea"></div>
-          <p class="firma-label">
-            Fecha de firma: {{ informe.fecha_firmado|date:"d/m/Y H:i" }}
-          </p>
-          <p class="firma-label">Informe electrónico firmado</p>
-        </td>
-      </tr>
-    </table>
-  </div>
+    <!-- FIRMA -->
+    <div class="signature-block">
+        <div class="signature-box">
+            <div class="signature-line">
+                <div class="signature-name">{{ medico_nombre|default:"________________________" }}</div>
+                <div class="signature-role">Médico Radiólogo</div>
+                <div class="signature-date">{{ fecha_firmado|date:"d/m/Y H:i"|default:"________________________" }}</div>
+            </div>
+        </div>
+        <div class="signature-box">
+            <div class="signature-line">
+                <div class="signature-name">Dra./Dr. ________________________</div>
+                <div class="signature-role">Jefe de Servicio de Radiología</div>
+                <div class="signature-date">{{ fecha_hoy }}</div>
+            </div>
+        </div>
+    </div>
 
-  <div class="footer">
-    Generado por Neo RX · Sistema de apoyo diagnóstico ResNet-50 (25.5M parámetros) ·
-    Entrenado: PadChest · NIH · RSNA · SIIM · VinBigData<br/>
-    <strong>Documento confidencial — Uso médico exclusivo · No reemplaza criterio clínico del especialista</strong>
-  </div>
+    <!-- DISCLAIMER LEGAL -->
+    <div class="disclaimer">
+        <strong>AVISO LEGAL — Ley 3131 de Ejercicio Médico (Bolivia):</strong>
+        Este informe es un <strong>documento preliminar generado por sistema de apoyo diagnóstico (IA)</strong>
+        y <strong>NO sustituye el juicio clínico del médico radiólogo especialista</strong>.
+        Requiere validación, revisión y firma del profesional habilitado para tener validez legal.
+        La responsabilidad final del diagnóstico recae exclusivamente en el médico firmante.
+    </div>
 
 </body>
 </html>

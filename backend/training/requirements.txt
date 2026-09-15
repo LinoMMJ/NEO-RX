@@ -1,0 +1,34 @@
+# Training-only dependencies for Neo RX fine-tuning pipeline
+# Install in training environment (RunPod, local GPU, etc.)
+# NOT required for Django runtime
+
+# Core ML
+torch==2.5.1
+torchvision==0.20.1
+torchxrayvision==1.4.0
+
+# Data
+numpy==2.1.0
+pandas==2.2.2
+opencv-python-headless==4.10.0.84
+pillow==10.4.0
+
+# Metrics & ML utils
+scikit-learn==1.5.1
+scipy==1.14.1
+
+# Dataset download
+kagglehub==0.3.8
+
+# Config
+pyyaml==6.0.1
+
+# Training utilities
+tqdm==4.66.5
+
+# Logging & Visualization
+tensorboard==2.18.0
+matplotlib==3.9.2
+
+# Optional: Weights & Biases (uncomment if using)
+# wandb==0.19.1

@@ -1,0 +1,52 @@
+# Dockerfile for Neo RX Fine-tuning Training
+# Optimized for RunPod / Lambda / vast.ai GPU instances
+# Base: PyTorch 2.5.1 with CUDA 12.4
+
+FROM pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
+
+# Metadata
+LABEL maintainer="Neo RX Team"
+LABEL description="Fine-tuning environment for ResNet-50 on NIH ChestX-ray14"
+
+# Prevent interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# System dependencies for OpenCV, PIL, etc.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libgl1-mesa-glx \
+    libgomp1 \
+    wget \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /workspace
+
+# Copy training requirements first (for cache efficiency)
+COPY backend/training/requirements.txt /workspace/requirements.txt
+
+# Install Python dependencies
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r /workspace/requirements.txt
+
+# Copy training source code
+COPY backend/training/ /workspace/training/
+
+# Create data and checkpoints directories
+RUN mkdir -p /workspace/data/nih /workspace/checkpoints /workspace/runs
+
+# Expose ports for TensorBoard (6006) and optional Jupyter (8888)
+EXPOSE 6006 8888
+
+# Default entrypoint: bash (interactive) or run training directly
+# Usage examples:
+#   docker run --gpus all -it neorx-training bash
+#   docker run --gpus all -v /host/data:/workspace/data neorx-training python -m training.prepare_dataset --data-dir /workspace/data/nih --source kaggle
+#   docker run --gpus all -v /host/data:/workspace/data -v /host/checkpoints:/workspace/checkpoints neorx-training python -m training.train --config /workspace/training/config.yaml
+ENTRYPOINT ["/bin/bash"]
