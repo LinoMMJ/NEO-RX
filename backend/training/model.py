@@ -4,7 +4,9 @@ Model Building, Checkpoint Save/Load for Fine-tuning
 Provides:
 - build_model(): Creates torchxrayvision ResNet with swapped head
 - Freeze/unfreeze helpers for two-stage training
-- save_checkpoint() / load_checkpoint() with metadata
+- save_checkpoint() / load_checkpoint() with metadata including thresholds and pos_weight
+
+IMPORTANT: All metrics are PENDIENTE DE EJECUCIÓN EXPERIMENTAL.
 """
 
 from pathlib import Path
@@ -15,6 +17,7 @@ import torch.nn as nn
 import torchxrayvision as xrv
 
 
+# Default NIH labels (for reference/backward compatibility)
 NIH_LABELS: List[str] = [
     "Atelectasis",
     "Cardiomegaly",
@@ -32,6 +35,22 @@ NIH_LABELS: List[str] = [
     "Pneumothorax",
 ]
 
+# Pulmonary-only labels (12 classes, excludes Cardiomegaly, Hernia)
+PULMONARY_LABELS: List[str] = [
+    "Atelectasis",
+    "Consolidation",
+    "Edema",
+    "Emphysema",
+    "Effusion",
+    "Fibrosis",
+    "Infiltration",
+    "Mass",
+    "Nodule",
+    "Pleural_Thickening",
+    "Pneumonia",
+    "Pneumothorax",
+]
+
 
 def build_model(cfg: Dict) -> xrv.models.ResNet:
     """
@@ -40,12 +59,12 @@ def build_model(cfg: Dict) -> xrv.models.ResNet:
     Args:
         cfg: Config dict with 'model' key containing:
             - base_weights: str (e.g., "resnet50-res512-all")
-            - num_classes: int (14 for NIH)
+            - num_classes: int (12 for pulmonary labels)
 
     Returns:
         xrv.models.ResNet with:
             - model.model.fc = nn.Linear(2048, num_classes)
-            - model.pathologies = NIH_LABELS
+            - model.pathologies = configured labels
             - model.op_norm = nn.Sigmoid() (preserved from xrv)
     """
     base_weights = cfg["model"]["base_weights"]
@@ -59,8 +78,9 @@ def build_model(cfg: Dict) -> xrv.models.ResNet:
     in_features = model.model.fc.in_features  # 2048 for ResNet-50
     model.model.fc = nn.Linear(in_features, num_classes)
 
-    # Set pathologies list for metadata (used by DetectorTorax at inference)
-    model.pathologies = NIH_LABELS.copy()
+    # Set pathologies list from config (or default to pulmonary)
+    labels = cfg.get("pulmonary_labels", cfg.get("nih_labels", PULMONARY_LABELS))
+    model.pathologies = labels.copy()
 
     return model
 
@@ -117,6 +137,9 @@ def save_checkpoint(
     labels_es: Dict[str, str],
     metrics: Optional[Dict] = None,
     extra: Optional[Dict] = None,
+    thresholds: Optional[List[float]] = None,
+    pos_weight: Optional[List[float]] = None,
+    training_state: Optional[Dict[str, Any]] = None,
 ) -> None:
     """
     Save model checkpoint with full metadata for inference integration.
@@ -128,6 +151,9 @@ def save_checkpoint(
         labels_es: EN -> ES mapping
         metrics: Optional dict with AUC, etc.
         extra: Any extra metadata (e.g., config, date, git hash)
+        thresholds: Optional list of optimal thresholds per class (from validation)
+        pos_weight: Optional list of pos_weight values per class (from train split)
+        training_state: Optimizer/scheduler/scaler/RNG state for exact resume.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -142,24 +168,42 @@ def save_checkpoint(
         "pulmonary_labels": [l for l in pathologies if l not in ("Cardiomegaly", "Hernia")],
     }
 
+    # Add thresholds if provided (from validation optimization)
+    if thresholds is not None:
+        # Ensure thresholds match pathologies order
+        if isinstance(thresholds, dict):
+            threshold_dict = {label: float(thresholds[label]) for label in pathologies}
+        else:
+            threshold_dict = {label: float(thr) for label, thr in zip(pathologies, thresholds)}
+        checkpoint["thresholds"] = threshold_dict
+        checkpoint["thresholds_list"] = [threshold_dict[label] for label in pathologies]
+
+    # Add pos_weight if provided (calculated from TRAIN split)
+    if pos_weight is not None:
+        checkpoint["pos_weight"] = [float(w) for w in pos_weight]
+
     if metrics:
         checkpoint["metrics"] = metrics
     if extra:
         checkpoint["extra"] = extra
+    if training_state:
+        checkpoint["training_state"] = training_state
 
     # Add timestamp
-    from datetime import datetime
-    checkpoint["saved_at"] = datetime.utcnow().isoformat() + "Z"
+    from datetime import datetime, timezone
+    checkpoint["saved_at"] = datetime.now(timezone.utc).isoformat()
 
-    torch.save(checkpoint, path, _use_new_zipfile_serialization=True)
-    print(f"Checkpoint saved to {path}")
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    torch.save(checkpoint, temporary, _use_new_zipfile_serialization=True)
+    temporary.replace(path)
+    print(f"Checkpoint saved atomically to {path}")
 
 
 def load_checkpoint(path: Path) -> Dict[str, Any]:
     """
     Load checkpoint dict.
 
-    Returns dict with keys: state_dict, pathologies, labels_es, metrics, etc.
+    Returns dict with keys: state_dict, pathologies, labels_es, metrics, thresholds, pos_weight, etc.
     """
     path = Path(path)
     if not path.exists():
@@ -205,5 +249,33 @@ def load_finetuned_model(
     # Set pathologies for metadata
     model.pathologies = pathologies
 
+    # Attach thresholds if available (for inference use)
+    if "thresholds" in ckpt:
+        model.thresholds = ckpt["thresholds"]
+    elif "thresholds_list" in ckpt:
+        model.thresholds = {label: thr for label, thr in zip(pathologies, ckpt["thresholds_list"])}
+
     model.eval()
     return model
+
+
+def get_thresholds_from_checkpoint(checkpoint_path: Path) -> Dict[str, float]:
+    """
+    Extract thresholds from a checkpoint file.
+
+    Returns:
+        Dict mapping label -> threshold
+    """
+    ckpt = load_checkpoint(checkpoint_path)
+    if "thresholds" in ckpt:
+        return ckpt["thresholds"]
+    elif "thresholds_list" in ckpt:
+        pathologies = ckpt["pathologies"]
+        return {label: thr for label, thr in zip(pathologies, ckpt["thresholds_list"])}
+    return {}
+
+
+def get_pos_weight_from_checkpoint(checkpoint_path: Path) -> Optional[List[float]]:
+    """Extract pos_weight from a checkpoint file."""
+    ckpt = load_checkpoint(checkpoint_path)
+    return ckpt.get("pos_weight")

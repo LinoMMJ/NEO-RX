@@ -2,9 +2,9 @@
 Seguridad y Compliance — Encriptación, Logging, Rate Limiting, Headers.
 
 Componentes:
-1. EncryptedField — Campo encriptado para CI y datos DICOM (django-cryptography)
+1. EncryptedCIField — Fernet para CI; DICOM privado sin cifrado binario
 2. StructuredLoggingMiddleware — Logging JSON con request_id
-3. AuditLog — Modelo de auditoría inmutable
+3. AuditLog — Modelo de auditoría inmutable (ver neorx.models.AuditLog)
 4. Rate limiting — django-ratelimit configurado
 5. Security Headers — HSTS, CSP, X-Frame-Options, etc.
 """
@@ -18,115 +18,23 @@ from functools import wraps
 from django.conf import settings
 from django.utils.deprecation import MiddlewareMixin
 from django.http import HttpResponse
-from django.db import models
-from django.contrib.auth import get_user_model
 from cryptography.fernet import Fernet
 
-# ──────────────────────────────────────────────────────────────────────────────
-# 1. CAMPOS ENCRIPTADOS (django-cryptography)
-# ──────────────────────────────────────────────────────────────────────────────
-
-# django-cryptography usa settings.FERNET_KEYS para encriptar automáticamente
-# Basta con usar models.EncryptedCharField / EncryptedTextField / EncryptedFileField
-# en los modelos. La key se configura en settings.FERNET_KEYS.
-
-# Ejemplo de uso en modelos:
-#   from django_cryptography.fields import encrypt
-#   ci = encrypt(models.CharField(max_length=20))
-#   archivo_dicom = encrypt(models.FileField(...))
+from neorx.models import AuditLog, log_audit, get_client_ip, redact_sensitive
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 2. AUDIT LOG MODELO
+# 1. CAMPOS ENCRIPTADOS (PyCA cryptography)
 # ──────────────────────────────────────────────────────────────────────────────
 
-User = get_user_model()
+# Paciente.ci utiliza neorx.fields.EncryptedCIField y FERNET_KEY.
+# El archivo DICOM no está cifrado; /media/ exige JWT y permiso de lectura.
 
+# ──────────────────────────────────────────────────────────────────────────────
+# 2. AUDIT LOG — Usar neorx.models.AuditLog y neorx.models.log_audit
+# ──────────────────────────────────────────────────────────────────────────────
 
-class AuditLog(models.Model):
-    """Registro inmutable de auditoría para compliance médico."""
-    ACTION_CHOICES = [
-        ("create", "Crear"),
-        ("read", "Leer"),
-        ("update", "Actualizar"),
-        ("delete", "Eliminar"),
-        ("login", "Login"),
-        ("logout", "Logout"),
-        ("export", "Exportar"),
-        ("firmar", "Firmar informe"),
-        ("diagnostico", "Ejecutar diagnóstico"),
-    ]
-
-    id = models.BigAutoField(primary_key=True)
-    timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
-    request_id = models.UUIDField(default=uuid.uuid4, editable=False, db_index=True)
-
-    user = models.ForeignKey(
-        User, on_delete=models.SET_NULL, null=True, blank=True,
-        related_name="audit_logs"
-    )
-    user_role = models.CharField(max_length=20, blank=True)
-
-    action = models.CharField(max_length=20, choices=ACTION_CHOICES, db_index=True)
-    resource_type = models.CharField(max_length=50)  # 'paciente', 'estudio', 'informe', etc.
-    resource_id = models.CharField(max_length=100, blank=True)
-
-    ip_address = models.GenericIPAddressField(null=True, blank=True)
-    user_agent = models.TextField(blank=True)
-
-    # Detalles del cambio (JSON)
-    before = models.JSONField(null=True, blank=True)
-    after = models.JSONField(null=True, blank=True)
-
-    # Metadatos adicionales
-    metadata = models.JSONField(default=dict, blank=True)
-
-    class Meta:
-        ordering = ["-timestamp"]
-        indexes = [
-            models.Index(fields=["user", "timestamp"]),
-            models.Index(fields=["resource_type", "resource_id"]),
-            models.Index(fields=["action", "timestamp"]),
-        ]
-
-    def __str__(self):
-        return f"{self.timestamp:%Y-%m-%d %H:%M} | {self.user} | {self.action} | {self.resource_type}#{self.resource_id}"
-
-
-def log_audit(
-    request,
-    action: str,
-    resource_type: str,
-    resource_id: str = "",
-    before: dict = None,
-    after: dict = None,
-    metadata: dict = None,
-):
-    """Helper para registrar auditoría desde vistas/servicios."""
-    try:
-        AuditLog.objects.create(
-            request_id=getattr(request, "request_id", uuid.uuid4()),
-            user=request.user if hasattr(request, "user") and request.user.is_authenticated else None,
-            user_role=getattr(request.user, "rol", "") if hasattr(request, "user") else "",
-            action=action,
-            resource_type=resource_type,
-            resource_id=str(resource_id),
-            ip_address=get_client_ip(request),
-            user_agent=request.META.get("HTTP_USER_AGENT", "")[:500],
-            before=before,
-            after=after,
-            metadata=metadata or {},
-        )
-    except Exception:
-        # Nunca fallar la request principal por auditoría
-        pass
-
-
-def get_client_ip(request):
-    x_forwarded = request.META.get("HTTP_X_FORWARDED_FOR")
-    if x_forwarded:
-        return x_forwarded.split(",")[0].strip()
-    return request.META.get("REMOTE_ADDR")
-
+# El modelo AuditLog y la función log_audit están definidos en neorx.models
+# Se importan arriba: from neorx.models import AuditLog, log_audit, get_client_ip, redact_sensitive
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 3. STRUCTURED LOGGING MIDDLEWARE
@@ -151,8 +59,8 @@ class StructuredLoggingMiddleware(MiddlewareMixin):
             "event": "request_start",
             "request_id": str(request.request_id),
             "method": request.method,
-            "path": request.path,
-            "query_params": dict(request.GET),
+            "path": "/media/[PRIVATE]" if request.path.startswith("/media/") else request.path,
+            "query_params": {key: "[REDACTED]" for key in request.GET},
             "ip": get_client_ip(request),
             "user_agent": request.META.get("HTTP_USER_AGENT", "")[:200],
             "user": str(request.user) if hasattr(request, "user") and request.user.is_authenticated else "anonymous",
@@ -173,7 +81,7 @@ class StructuredLoggingMiddleware(MiddlewareMixin):
             "event": "request_end",
             "request_id": str(request_id),
             "method": request.method,
-            "path": request.path,
+            "path": "/media/[PRIVATE]" if request.path.startswith("/media/") else request.path,
             "status_code": response.status_code,
             "latency_ms": latency_ms,
             "user": str(request.user) if hasattr(request, "user") and request.user.is_authenticated else "anonymous",
@@ -252,7 +160,7 @@ class SecurityHeadersMiddleware(MiddlewareMixin):
 Añadir a settings.py:
 
 # ─── Security ────────────────────────────────────────────────────────────────
-FERNET_KEYS = [os.getenv("FERNET_KEY")]  # Generar con: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+FERNET_KEY = os.getenv("FERNET_KEY")  # Generar con: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 
 SECURITY_HEADERS = {
     "HSTS": True,

@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { CheckCircle, AlertTriangle } from 'lucide-react'
 import Spinner from '../ui/Spinner'
+import usePrivateImage from '../../hooks/usePrivateImage'
 
 // Placeholder vectorial cuando la imagen no está disponible o falla la carga
 function PlaceholderRadiografia() {
@@ -46,10 +47,7 @@ export default function VisorImagen({
   patologias, patologiaSeleccionada, onPatologiaChange,
 }) {
   const [vista, setVista] = useState('original')
-  const [imgError, setImgError] = useState(false)
-
-  // Reinicia el estado de error si cambia la imagen base
-  useEffect(() => { setImgError(false) }, [imagenUrl])
+  const [failedSource, setFailedSource] = useState(null)
 
   // Mientras GradCAM carga, muestra imagen original como fondo (nunca placeholder vacío)
   const imgSrc =
@@ -57,12 +55,14 @@ export default function VisorImagen({
     vista === 'calor'   ? (gradCAM?.solo_calor || imagenUrl) :
     imagenUrl
 
+  const privateSrc = usePrivateImage(imgSrc)
+
   // Grad-CAM no disponible: pedimos overlay/calor pero solo hay imagen base
   const gradcamNoDisponible =
     vista !== 'original' && !gradCAMCargando && (gradCAMError || !gradCAM)
 
   // Solo muestra placeholder si realmente no hay ninguna URL de imagen
-  const mostrarPlaceholder = !imgSrc || imgError
+  const mostrarPlaceholder = !privateSrc || failedSource === privateSrc
 
   // Patologías con prob > 40% para mostrar como pills
   const patologiasSignificativas = patologias
@@ -100,9 +100,9 @@ export default function VisorImagen({
           <AnimatePresence mode="wait">
             <motion.img
               key={imgSrc}
-              src={imgSrc}
+              src={privateSrc}
               alt="Radiografía de tórax"
-              onError={() => setImgError(true)}
+              onError={() => setFailedSource(privateSrc)}
               className="w-full h-full object-contain max-h-[420px]"
               style={{ filter: vista === 'original' ? 'brightness(1.1) contrast(1.05)' : 'none' }}
               initial={{ opacity: 0 }}

@@ -1,24 +1,36 @@
 import io
+import time
 import uuid
 
 import numpy as np
 import pydicom as _pydicom
 from PIL import Image as PILImage
 from django.core.files.base import ContentFile
-
-from rest_framework.views import APIView
-from rest_framework.generics import RetrieveAPIView
+from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework import status
+from rest_framework.filters import OrderingFilter, SearchFilter
+from rest_framework.generics import ListAPIView, RetrieveAPIView
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from rest_framework import status
+from rest_framework.views import APIView
 
+from neorx.models import log_audit
+from neorx.permissions import ReceptionUploadPermission
+from diagnostico.results import probabilities_es
 from pacientes.models import Estudio
 from .models import ImagenDICOM
 from .serializers import ImagenDICOMSerializer
 from .utils import calcular_borrosidad, detect_projection_type
-
+from .validators import BLUR_THRESHOLD, FileValidationError, validate_file_comprehensive
 
 _IMG_EXTS = ('.png', '.jpg', '.jpeg', '.webp')
+
+
+class StandardResultsPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = 'page_size'
+    max_page_size = 100
 
 
 def _get_imagen_url(request, imagen):
@@ -49,7 +61,7 @@ def _dicom_a_png(ruta_dcm):
 
 
 class UploadDICOMView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [ReceptionUploadPermission]
 
     def post(self, request):
         archivo = request.FILES.get("archivo")
@@ -66,9 +78,36 @@ class UploadDICOMView(APIView):
         except Estudio.DoesNotExist:
             return Response({"error": "Estudio no encontrado."}, status=status.HTTP_400_BAD_REQUEST)
 
+        if estudio.estado == "completado":
+            return Response({"error": "El estudio ya tiene un informe firmado."}, status=400)
+
+        # ─── VALIDACIÓN ROBUSTA DEL ARCHIVO (antes de guardar en BD) ───
+        try:
+            validation_result = validate_file_comprehensive(archivo, file_type='auto')
+        except FileValidationError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not validation_result['valid']:
+            return Response(
+                {"error": "Archivo inválido", "detalles": validation_result['errors']},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        metadata = validation_result.get('metadata', {})
+        warnings = validation_result.get('warnings', [])
+
         imagen = None
         try:
             imagen = ImagenDICOM.objects.create(estudio=estudio, archivo_dicom=archivo)
+            log_audit(
+                request,
+                action="create",
+                resource_type="imagen_dicom",
+                resource_id=str(imagen.pk),
+                after={"estudio_id": estudio.pk},
+                metadata={"created_by": request.user.username if request.user.is_authenticated else "system"},
+            )
+
             ruta = imagen.archivo_dicom.path
             ruta_lower = ruta.lower()
             es_dicom = ruta_lower.endswith(".dcm") or ruta_lower.endswith(".dicom")
@@ -87,22 +126,38 @@ class UploadDICOMView(APIView):
             imagen.proyeccion_fuente = proyeccion["fuente"]
 
             # Verificación de borrosidad
-            es_nitida, varianza = calcular_borrosidad(ruta)
+            es_nitida, varianza = calcular_borrosidad(ruta, umbral=BLUR_THRESHOLD)
             imagen.es_nitida = es_nitida
             imagen.varianza_laplaciana = varianza
 
+            log_audit(
+                request,
+                action="validate",
+                resource_type="imagen_dicom",
+                resource_id=str(imagen.pk),
+                after={"es_nitida": es_nitida, "varianza": varianza},
+                metadata={"umbral": BLUR_THRESHOLD, "proyeccion": proyeccion.get("tipo")},
+            )
+
             if not es_nitida:
+                estudio.estado = "requiere_repeticion"
+                estudio.save(update_fields=["estado"])
+                log_audit(request, action="validate", resource_type="estudio", resource_id=str(estudio.pk),
+                          after={"estado": estudio.estado}, metadata={"motivo": "calidad técnica insuficiente"})
                 imagen.estado_procesamiento = "procesado"
                 imagen.save()
                 resp = {
                     "alerta": "borrosidad",
                     "varianza": varianza,
+                    "umbral": BLUR_THRESHOLD,
                     "imagen_id": imagen.pk,
                     "proyeccion": proyeccion,
                 }
                 url = _get_imagen_url(request, imagen)
                 if url:
                     resp["imagen_png_url"] = url
+                if warnings:
+                    resp["advertencias"] = warnings
                 return Response(resp, status=status.HTTP_200_OK)
 
             imagen.save()
@@ -111,39 +166,50 @@ class UploadDICOMView(APIView):
             celery_ok = False
             try:
                 from diagnostico.tasks import procesar_imagen_cnn
-                tarea = procesar_imagen_cnn.delay(imagen.pk)
+                task = procesar_imagen_cnn.delay(imagen.pk)
                 celery_ok = True
                 resp = {
                     "status": "procesando",
                     "mensaje": "Imagen recibida. Análisis CNN en proceso.",
                     "imagen_id": imagen.pk,
-                    "task_id": tarea.id,
+                    "task_id": task.id,
                     "proyeccion": proyeccion,
                 }
                 url = _get_imagen_url(request, imagen)
                 if url:
                     resp["imagen_png_url"] = url
+                if metadata:
+                    resp["metadatos"] = metadata
                 return Response(resp, status=status.HTTP_202_ACCEPTED)
             except Exception:
                 pass
 
             if not celery_ok:
-                import time
                 from diagnostico.services import DetectorTorax
                 from diagnostico.models import ResultadoCNN as ResultadoCNNModel
 
-                ruta = str(imagen.archivo_dicom.path)
-                es_dicom = ruta.lower().endswith((".dcm", ".dicom"))
                 t0 = time.time()
                 patologias = DetectorTorax.desde_dicom(ruta) if es_dicom else DetectorTorax.desde_png(ruta)
                 tiempo = round(time.time() - t0, 3)
 
                 ResultadoCNNModel.objects.update_or_create(
                     imagen=imagen,
-                    defaults={"patologias": patologias, "tiempo_inferencia_seg": tiempo},
+                    defaults={"patologias": probabilities_es(patologias), "tiempo_inferencia_seg": tiempo},
                 )
                 imagen.estado_procesamiento = "procesado"
                 imagen.save()
+
+                log_audit(
+                    request,
+                    action="process",
+                    resource_type="imagen_dicom",
+                    resource_id=str(imagen.pk),
+                    after={
+                        "tiempo_inferencia_seg": tiempo,
+                        "n_hallazgos": len(patologias) if isinstance(patologias, dict) else 0,
+                    },
+                    metadata={"modo": "inferencia_local"},
+                )
 
                 resp = {
                     "status": "SUCCESS",
@@ -154,16 +220,53 @@ class UploadDICOMView(APIView):
                     "varianza_laplaciana": imagen.varianza_laplaciana,
                     "proyeccion": proyeccion,
                 }
+                if warnings:
+                    resp["advertencias"] = warnings
+                if metadata:
+                    resp["metadatos"] = metadata
                 url = _get_imagen_url(request, imagen)
                 if url:
                     resp["imagen_png_url"] = url
                 return Response(resp, status=status.HTTP_200_OK)
 
+        except FileValidationError as e:
+            if imagen is not None:
+                imagen.estado_procesamiento = "error"
+                imagen.save()
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as exc:
             if imagen is not None:
                 imagen.estado_procesamiento = "error"
                 imagen.save()
             return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ImagenDICOMListView(ListAPIView):
+    """GET /api/estudios/imagenes/ — Lista paginada de imágenes con filtros."""
+    serializer_class = ImagenDICOMSerializer
+    permission_classes = [IsAuthenticated]
+    pagination_class = StandardResultsPagination
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['estado_procesamiento', 'tipo_proyeccion', 'es_nitida', 'estudio']
+    search_fields = ['estudio__paciente__nombres', 'estudio__paciente__apellidos', 'estudio__paciente__ci']
+    ordering_fields = ['fecha_subida', 'varianza_laplaciana']
+    ordering = ['-fecha_subida']
+
+    def get_queryset(self):
+        qs = ImagenDICOM.objects.select_related('estudio__paciente').all()
+        estudio_id = self.request.query_params.get('estudio')
+        if estudio_id:
+            qs = qs.filter(estudio_id=estudio_id)
+        paciente_id = self.request.query_params.get('paciente')
+        if paciente_id:
+            qs = qs.filter(estudio__paciente_id=paciente_id)
+        fecha_desde = self.request.query_params.get('fecha_desde')
+        if fecha_desde:
+            qs = qs.filter(fecha_subida__date__gte=fecha_desde)
+        fecha_hasta = self.request.query_params.get('fecha_hasta')
+        if fecha_hasta:
+            qs = qs.filter(fecha_subida__date__lte=fecha_hasta)
+        return qs
 
 
 class ObtenerEstadoTareaView(APIView):
@@ -208,7 +311,7 @@ class ObtenerEstadoTareaView(APIView):
 
         if state == 'FAILURE':
             return Response(
-                {"status": "FAILURE", "error": str(resultado.info)},
+                {"status": "FAILURE", "error": "No se pudo procesar la imagen. Contacte al administrador."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
@@ -216,6 +319,6 @@ class ObtenerEstadoTareaView(APIView):
 
 
 class ImagenDICOMDetailView(RetrieveAPIView):
-    queryset = ImagenDICOM.objects.all()
+    queryset = ImagenDICOM.objects.select_related('estudio__paciente').all()
     serializer_class = ImagenDICOMSerializer
     permission_classes = [IsAuthenticated]

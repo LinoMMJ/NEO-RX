@@ -9,6 +9,25 @@ _DESC_PROYECCION = {
 }
 
 
+def leer_dicom(ruta, force=False):
+    """Lee un archivo DICOM de forma robusta.
+
+    Algunos archivos .dcm/.dicom exportados por software propietario (como el
+    del centro Neo Rayos X) no incluyen el prefijo 'DICM' del File Meta
+    Information header. pydicom.dcmread() falla con:
+        "File is missing DICOM File Meta Information header or the 'DICM'
+         prefix is missing from the header."
+
+    Esta funcion intenta la lectura normal y, si falla por el encabezado,
+    reintenta con force=True (permite leer datasets sin meta header).
+    """
+    try:
+        return pydicom.dcmread(ruta, force=force)
+    except Exception:
+        # Si fallo sin force (o con force) por header faltante, reintentar con force
+        return pydicom.dcmread(ruta, force=True)
+
+
 def detect_projection_type(ruta_dcm_o_metadata):
     """Detecta el tipo de proyección de la radiografía de tórax.
 
@@ -29,7 +48,7 @@ def detect_projection_type(ruta_dcm_o_metadata):
     # ── Prioridad 1: tag DICOM ViewPosition ──
     if es_dicom:
         try:
-            ds = pydicom.dcmread(ruta)
+            ds = leer_dicom(ruta)
             view = str(getattr(ds, "ViewPosition", "") or "").strip().upper()
             mapa = {
                 "PA": "PA", "AP": "AP",
@@ -49,7 +68,7 @@ def detect_projection_type(ruta_dcm_o_metadata):
     # ── Prioridad 2: inferencia por la imagen ──
     try:
         if es_dicom:
-            ds = pydicom.dcmread(ruta)
+            ds = leer_dicom(ruta)
             arr = ds.pixel_array.astype(np.float32)
             if getattr(ds, "PhotometricInterpretation", "") == "MONOCHROME1":
                 arr = arr.max() - arr
@@ -108,7 +127,7 @@ def calcular_borrosidad(ruta_imagen, umbral=100.0):
     Una varianza menor al umbral indica borrosidad cinética."""
     ruta = str(ruta_imagen)
     if ruta.lower().endswith(".dcm"):
-        ds = pydicom.dcmread(ruta)
+        ds = leer_dicom(ruta)
         arr = ds.pixel_array.astype(np.float32)
         arr = (arr - arr.min()) / (arr.max() - arr.min() + 1e-8) * 255
         imagen_gris = arr.astype(np.uint8)

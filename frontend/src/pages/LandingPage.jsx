@@ -104,8 +104,8 @@ export default function LandingPage() {
             </h1>
 
             <p className="mt-6 text-white/55 text-lg leading-relaxed max-w-xl">
-              ResNet-50 entrenado en más de 112,000 radiografías para la detección
-              automatizada de patologías pulmonares.
+              Gestione pacientes, imágenes e informes radiológicos con apoyo
+              de análisis experimental y revisión médica.
             </p>
 
             <div className="mt-9 flex flex-col sm:flex-row gap-3">

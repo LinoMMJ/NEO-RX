@@ -103,7 +103,7 @@ class TestInformeAPI:
         url = reverse("generar-informe")
         response = auth_client.post(url, {"estudio_id": estudio.id}, format="json")
         assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert "CNN" in response.json()["error"]
+        assert "imágenes" in response.json()["error"]
 
     def test_detalle_informe(self, auth_client, imagen_con_resultado):
         from informes.models import InformePreliminar
@@ -143,7 +143,7 @@ class TestInformeAPI:
         informe = InformePreliminar.objects.create(
             estudio=imagen_con_resultado.estudio,
             hallazgos="Hallazgos", impresion="Impresión",
-            recomendaciones="Recomendaciones",
+            recomendaciones="Recomendaciones", estado="revisado",
         )
         url = reverse("informe-detail", kwargs={"pk": informe.id})
         response = auth_client.put(url, {"estado": "firmado"}, format="json")
@@ -156,41 +156,51 @@ class TestInformeAPI:
 class TestExportPDF:
     """Tests de exportación PDF."""
 
-    @patch("informes.views.HTML")
-    def test_descargar_pdf_firmado(self, mock_html, auth_client, imagen_con_resultado):
+    def test_descargar_pdf_firmado(self, auth_client, imagen_con_resultado, medico_user):
         from informes.models import InformePreliminar
         informe = InformePreliminar.objects.create(
             estudio=imagen_con_resultado.estudio,
             hallazgos="Hallazgos", impresion="Impresión",
             recomendaciones="Recomendaciones",
-            estado="firmado",
+            estado="firmado", medico=medico_user, fecha_firmado=__import__("django.utils.timezone", fromlist=["now"]).now(),
         )
-        mock_html.return_value.write_pdf = MagicMock()
 
         url = reverse("descargar-informe-pdf", kwargs={"pk": informe.id})
         response = auth_client.get(url)
-        # No podemos verificar el PDF completo en test unitario, solo que no falla
-        assert response.status_code in [status.HTTP_200_OK, status.HTTP_501_NOT_IMPLEMENTED]
+        assert response.status_code == 200
+        assert response["Content-Type"] == "application/pdf"
+        content = b"".join(response.streaming_content)
+        assert content.startswith(b"%PDF") and len(content) > 1000
+        from pathlib import Path
+        evidence=Path(__file__).resolve().parents[2]/"docs"/"evidence"
+        evidence.mkdir(exist_ok=True)
+        (evidence/"synthetic-report.pdf").write_bytes(content)
+        from io import BytesIO
+        from pypdf import PdfReader
+        text = "\n".join(page.extract_text() for page in PdfReader(BytesIO(content)).pages)
+        assert "Paciente" in text and "Hallazgos" in text and "No sustituye" in text
 
 
 class TestExportDICOMSR:
     """Tests de exportación DICOM SR."""
 
-    def test_descargar_dicom_sr_firmado(self, auth_client, imagen_con_resultado):
+    def test_descargar_dicom_sr_firmado(self, auth_client, imagen_con_resultado, medico_user):
         from informes.models import InformePreliminar
         informe = InformePreliminar.objects.create(
             estudio=imagen_con_resultado.estudio,
             hallazgos="Hallazgos", impresion="Impresión",
             recomendaciones="Recomendaciones",
-            estado="firmado",
+            estado="firmado", medico=medico_user, fecha_firmado=__import__("django.utils.timezone", fromlist=["now"]).now(),
         )
         url = reverse("descargar-informe-dicom-sr", kwargs={"pk": informe.id})
         response = auth_client.get(url)
-        # Verificar que no da error 404/403
-        assert response.status_code in [
-            status.HTTP_200_OK, status.HTTP_400_BAD_REQUEST,
-            status.HTTP_501_NOT_IMPLEMENTED
-        ]
+        assert response.status_code == 200
+        from io import BytesIO
+        import pydicom
+        ds = pydicom.dcmread(BytesIO(b"".join(response.streaming_content)))
+        assert ds.Modality == "SR"
+        assert ds.SOPInstanceUID == ds.file_meta.MediaStorageSOPInstanceUID
+        assert ds.ValueType == "CONTAINER" and ds.ContentSequence
 
     def test_descargar_dicom_sr_no_firmado(self, auth_client, imagen_con_resultado):
         from informes.models import InformePreliminar

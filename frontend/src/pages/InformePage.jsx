@@ -1,3 +1,4 @@
+import usePrivateImage from '../hooks/usePrivateImage'
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -6,9 +7,9 @@ import {
   User, AlertTriangle, ShieldCheck, X, Download,
 } from 'lucide-react'
 import { getInforme, updateInforme, descargarInformePDF } from '../api/informes'
-import { useAuth } from '../context/AuthContext'
-import { useToast } from '../context/ToastContext'
-import { calcularEdad } from '../components/scan/BuscadorPaciente'
+import { useAuth } from '../context/useAuth'
+import { useToast } from '../context/useToast'
+import { calcularEdad } from '../components/scan/patientUtils'
 import Spinner from '../components/ui/Spinner'
 
 const ESTADO_BADGE = {
@@ -35,8 +36,9 @@ function barColor(p) {
 }
 
 function ThumbRadiografia({ url }) {
+  const privateUrl = usePrivateImage(url)
   const [error, setError] = useState(false)
-  if (!url || error) {
+  if (!privateUrl || error) {
     return (
       <div className="aspect-square rounded-xl bg-scan-bg border border-[#1e3a5f] flex flex-col items-center justify-center gap-2">
         <svg viewBox="0 0 200 200" className="w-24 h-24" aria-hidden="true">
@@ -50,7 +52,7 @@ function ThumbRadiografia({ url }) {
   }
   return (
     <img
-      src={url}
+      src={privateUrl}
       alt="Radiografía de tórax del estudio"
       onError={() => setError(true)}
       className="aspect-square w-full object-contain rounded-xl bg-scan-bg border border-[#1e3a5f]"
@@ -366,7 +368,8 @@ export default function InformePage() {
               </button>
               <button
                 onClick={() => setConfirmar(true)}
-                disabled={firmado || guardando}
+                disabled={firmado || guardando || informe?.estado !== 'revisado'}
+                title="Marca el informe como revisado antes de firmar"
                 className="flex-1 inline-flex items-center justify-center gap-2 py-2.5 rounded-lg bg-navy
                   text-white font-heading font-semibold text-sm shadow-md hover:brightness-125 hover:scale-[1.01] transition-all cursor-pointer
                   disabled:opacity-50 disabled:cursor-not-allowed"

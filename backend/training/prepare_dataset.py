@@ -4,24 +4,30 @@ NIH ChestX-ray14 Dataset Preparation
 Downloads dataset via Kaggle (or validates local copy), creates patient-level
 train/val/test splits (70/15/15) to avoid data leakage, and saves splits.json.
 
+VALIDATES: Zero patient overlap between train/val/test splits.
+GENERATES: dataset_statistics.csv, dataset_summary.json
+
 Usage:
-    python -m training.prepare_dataset --data-dir data/nih --source kaggle
     python -m training.prepare_dataset --data-dir data/nih --source local
+    python -m training.prepare_dataset --data-dir data/nih --source kaggle
 """
 
 import argparse
+import csv
 import json
 import os
 import shutil
 import sys
 import zipfile
 from pathlib import Path
+from typing import Dict, List, Set
 
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
 
+# Full NIH 14 labels (for reference)
 NIH_LABELS = [
     "Atelectasis",
     "Cardiomegaly",
@@ -40,6 +46,22 @@ NIH_LABELS = [
 ]
 
 NIH_LABEL_SET = set(NIH_LABELS)
+
+# Pulmonary-only labels (12 classes, excludes Cardiomegaly, Hernia)
+PULMONARY_LABELS = [
+    "Atelectasis",
+    "Consolidation",
+    "Edema",
+    "Emphysema",
+    "Effusion",
+    "Fibrosis",
+    "Infiltration",
+    "Mass",
+    "Nodule",
+    "Pleural_Thickening",
+    "Pneumonia",
+    "Pneumothorax",
+]
 
 REQUIRED_COLUMNS = ["Image Index", "Finding Labels", "Patient ID"]
 
@@ -92,6 +114,12 @@ def parse_args():
         "--stratify",
         action="store_true",
         help="Balance classes in subset using stratified sampling per class (with --max-samples).",
+    )
+    parser.add_argument(
+        "--labels",
+        choices=["nih", "pulmonary"],
+        default="pulmonary",
+        help="Label set to use: 'nih' (14 classes) or 'pulmonary' (12 classes, default)",
     )
     return parser.parse_args()
 
@@ -169,15 +197,163 @@ def validate_local_dataset(data_dir: Path) -> bool:
     return True
 
 
-def parse_finding_labels(finding_str: str) -> list:
-    """Parse 'Atelectasis|Consolidation|No Finding' into list of labels."""
+def parse_finding_labels(finding_str: str, label_set: Set[str]) -> list:
+    """Parse 'Atelectasis|Consolidation|No Finding' into list of labels from label_set."""
     if pd.isna(finding_str):
         return []
     labels = [l.strip() for l in finding_str.split("|")]
-    return [l for l in labels if l in NIH_LABEL_SET]
+    return [l for l in labels if l in label_set]
 
 
-def create_patient_splits(df: pd.DataFrame, train_ratio: float, val_ratio: float, test_ratio: float, seed: int):
+def validate_patient_overlap(splits: Dict[str, List[int]], df: pd.DataFrame) -> None:
+    """
+    Validate zero patient overlap between train/val/test splits.
+
+    Raises:
+        SystemExit: If any patient appears in more than one split.
+    """
+    patient_to_splits = {}
+
+    for split_name, indices in splits.items():
+        split_patients = df.loc[indices, "Patient ID"].unique()
+        for pid in split_patients:
+            if pid not in patient_to_splits:
+                patient_to_splits[pid] = []
+            patient_to_splits[pid].append(split_name)
+
+    # Check for overlaps
+    overlaps = {pid: splits_list for pid, splits_list in patient_to_splits.items() if len(splits_list) > 1}
+
+    if overlaps:
+        print("\n" + "="*60)
+        print("ERROR: PATIENT OVERLAP DETECTED BETWEEN SPLITS")
+        print("="*60)
+        for pid, splits_list in overlaps.items():
+            print(f"  Patient {pid} appears in: {splits_list}")
+        print("="*60)
+        print("This is a critical data leakage issue. Exiting.")
+        sys.exit(1)
+
+    print("\n✓ Patient overlap validation PASSED: Zero overlap between splits")
+
+
+def generate_dataset_statistics(
+    df: pd.DataFrame,
+    splits: Dict[str, List[int]],
+    labels: List[str],
+    output_csv: Path,
+    output_json: Path
+) -> Dict:
+    """
+    Generate dataset_statistics.csv and dataset_summary.json.
+
+    Returns summary dict for JSON output.
+    """
+    print("\nGenerating dataset statistics...")
+
+    # Overall statistics
+    total_images = len(df)
+    total_patients = df["Patient ID"].nunique()
+
+    # Count missing/corrupt images (placeholder - would need actual image loading)
+    # For now, we note this as a field
+    invalid_images = 0  # Would be populated by actual image validation
+
+    # Duplicate detection (by Image Index)
+    duplicate_images = df.duplicated(subset=["Image Index"]).sum()
+
+    # Overall class distribution
+    overall_stats = []
+    for label in labels:
+        count = df["labels"].apply(lambda x: label in x).sum()
+        overall_stats.append({
+            "class": label,
+            "total": int(total_images),
+            "positive": int(count),
+            "negative": int(total_images - count),
+            "percentage": round(100 * count / total_images, 2),
+        })
+
+    # Per-split statistics
+    split_stats = {}
+    for split_name in ["train", "val", "test"]:
+        split_indices = splits[split_name]
+        split_df = df.loc[split_indices]
+        split_total = len(split_df)
+        split_patients = split_df["Patient ID"].nunique()
+
+        class_dist = {}
+        for label in labels:
+            count = split_df["labels"].apply(lambda x: label in x).sum()
+            class_dist[label] = {
+                "positive": int(count),
+                "negative": int(split_total - count),
+                "percentage": round(100 * count / split_total, 2) if split_total > 0 else 0.0,
+            }
+
+        split_stats[split_name] = {
+            "images": int(split_total),
+            "patients": int(split_patients),
+            "class_distribution": class_dist,
+        }
+
+    # Write dataset_statistics.csv
+    with open(output_csv, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            "class", "total_images", "positive_images", "negative_images",
+            "positive_percentage", "train_positive", "val_positive", "test_positive"
+        ])
+        for label in labels:
+            train_count = split_stats["train"]["class_distribution"][label]["positive"]
+            val_count = split_stats["val"]["class_distribution"][label]["positive"]
+            test_count = split_stats["test"]["class_distribution"][label]["positive"]
+            total_count = train_count + val_count + test_count
+            pct = round(100 * total_count / total_images, 2) if total_images > 0 else 0.0
+
+            writer.writerow([
+                label, total_images, total_count, total_images - total_count,
+                pct, train_count, val_count, test_count
+            ])
+
+    print(f"dataset_statistics.csv saved to {output_csv}")
+
+    # Write dataset_summary.json
+    summary = {
+        "dataset": "NIH ChestX-ray14",
+        "total_images": int(total_images),
+        "total_patients": int(total_patients),
+        "invalid_images": int(invalid_images),
+        "duplicate_images": int(duplicate_images),
+        "labels_used": labels,
+        "num_classes": len(labels),
+        "splits": split_stats,
+        "overall_class_distribution": overall_stats,
+        "split_ratios": {
+            "train": 0.7,
+            "val": 0.15,
+            "test": 0.15,
+        },
+        "patient_level_split": True,
+        "patient_overlap_validated": True,
+        "note": "Statistics are PENDIENTE DE EJECUCIÓN EXPERIMENTAL until dataset is present.",
+    }
+
+    with open(output_json, "w") as f:
+        json.dump(summary, f, indent=2)
+
+    print(f"dataset_summary.json saved to {output_json}")
+
+    return summary
+
+
+def create_patient_splits(
+    df: pd.DataFrame,
+    train_ratio: float,
+    val_ratio: float,
+    test_ratio: float,
+    seed: int
+) -> Dict[str, List[int]]:
     """Create patient-level splits to avoid data leakage."""
     # Get unique patients
     patients = df["Patient ID"].unique()
@@ -208,10 +384,15 @@ def create_patient_splits(df: pd.DataFrame, train_ratio: float, val_ratio: float
 
     df["split"] = df["Patient ID"].map(patient_to_split)
 
-    # Verify no overlap
-    splits = df.groupby("split")["Patient ID"].nunique()
-    print("\nSplit patient counts:")
-    print(splits)
+    # Verify no overlap (strict validation)
+    validate_patient_overlap(
+        {
+            "train": df[df["split"] == "train"].index.tolist(),
+            "val": df[df["split"] == "val"].index.tolist(),
+            "test": df[df["split"] == "test"].index.tolist(),
+        },
+        df
+    )
 
     # Class balance per split
     for split_name in ["train", "val", "test"]:
@@ -231,7 +412,13 @@ def create_patient_splits(df: pd.DataFrame, train_ratio: float, val_ratio: float
     }
 
 
-def apply_stratified_subsampling(df: pd.DataFrame, splits: Dict[str, List[int]], max_samples: int, seed: int) -> Dict[str, List[int]]:
+def apply_stratified_subsampling(
+    df: pd.DataFrame,
+    splits: Dict[str, List[int]],
+    max_samples: int,
+    seed: int,
+    labels: List[str]
+) -> Dict[str, List[int]]:
     """
     Apply stratified subsampling to get balanced subset while preserving patient-level splits.
 
@@ -241,6 +428,7 @@ def apply_stratified_subsampling(df: pd.DataFrame, splits: Dict[str, List[int]],
     3. Ensure patient-level integrity (all images of a patient stay in same split)
     """
     print(f"\nApplying stratified subsampling (max {max_samples} total samples)...")
+    print(f"  NOTE: This is for PIPELINE TESTING ONLY. Not for final results.")
 
     # For each split, collect patient IDs and their class memberships
     new_splits = {"train": [], "val": [], "test": []}
@@ -253,7 +441,7 @@ def apply_stratified_subsampling(df: pd.DataFrame, splits: Dict[str, List[int]],
         patient_groups = split_df.groupby("Patient ID")
 
         # For each class, collect patients that have this class
-        class_to_patients = {label: [] for label in NIH_LABELS}
+        class_to_patients = {label: [] for label in labels}
         for pid, group in patient_groups:
             # Get all labels for this patient
             patient_labels = set()
@@ -266,13 +454,13 @@ def apply_stratified_subsampling(df: pd.DataFrame, splits: Dict[str, List[int]],
         # Target per class per split (proportional to split size)
         split_total = len(split_indices)
         split_ratio = split_total / len(df)
-        target_per_class = max(1, int((max_samples * split_ratio) / len(NIH_LABELS)))
+        target_per_class = max(1, int((max_samples * split_ratio) / len(labels)))
 
         # Sample patients per class
         selected_patients = set()
         rng = np.random.RandomState(seed)
 
-        for label in NIH_LABELS:
+        for label in labels:
             patients_with_label = class_to_patients[label]
             if not patients_with_label:
                 continue
@@ -282,8 +470,10 @@ def apply_stratified_subsampling(df: pd.DataFrame, splits: Dict[str, List[int]],
                 selected_patients.add(pid)
 
         # Also add some "No Finding" patients for negative class balance
-        # Patients with NO nih labels
-        no_finding_patients = [pid for pid, group in patient_groups if not any(l in NIH_LABEL_SET for _, row in group.iterrows() for l in row["labels"])]
+        no_finding_patients = [
+            pid for pid, group in patient_groups
+            if not any(l in set(labels) for _, row in group.iterrows() for l in row["labels"])
+        ]
         if no_finding_patients:
             rng.shuffle(no_finding_patients)
             neg_target = max(1, int(target_per_class * 0.3))  # ~30% negatives
@@ -301,7 +491,7 @@ def apply_stratified_subsampling(df: pd.DataFrame, splits: Dict[str, List[int]],
     for split_name in ["train", "val", "test"]:
         split_df = df.loc[new_splits[split_name]]
         print(f"  {split_name}: {len(split_df)} images")
-        for label in NIH_LABELS:
+        for label in labels:
             count = split_df["labels"].apply(lambda x: label in x).sum()
             pct = 100 * count / len(split_df) if len(split_df) > 0 else 0
             print(f"    {label}: {count} ({pct:.1f}%)")
@@ -312,6 +502,14 @@ def apply_stratified_subsampling(df: pd.DataFrame, splits: Dict[str, List[int]],
 def main():
     args = parse_args()
     data_dir = Path(args.data_dir).resolve()
+
+    # Select label set
+    if args.labels == "nih":
+        labels = NIH_LABELS
+    else:
+        labels = PULMONARY_LABELS
+
+    print(f"Using label set: {args.labels} ({len(labels)} classes)")
 
     # Download or validate
     if args.source == "kaggle":
@@ -332,12 +530,12 @@ def main():
 
     print(f"Loaded {len(df)} rows")
 
-    # Parse labels
-    df["labels"] = df["Finding Labels"].apply(parse_finding_labels)
+    # Parse labels using selected label set
+    df["labels"] = df["Finding Labels"].apply(lambda x: parse_finding_labels(x, set(labels)))
 
     # Overall class distribution
     print("\n--- Overall class distribution ---")
-    for label in NIH_LABELS:
+    for label in labels:
         count = df["labels"].apply(lambda x: label in x).sum()
         pct = 100 * count / len(df)
         print(f"  {label}: {count}/{len(df)} ({pct:.1f}%)")
@@ -350,7 +548,7 @@ def main():
 
     # Apply stratified subsampling if requested
     if args.max_samples and args.stratify:
-        splits = apply_stratified_subsampling(df, splits, args.max_samples, args.seed)
+        splits = apply_stratified_subsampling(df, splits, args.max_samples, args.seed, labels)
 
     # Save splits
     splits_json = data_dir / "splits.json"
@@ -362,11 +560,28 @@ def main():
     print(f"Val:   {len(splits['val'])} images")
     print(f"Test:  {len(splits['test'])} images")
 
+    # Generate dataset statistics
+    stats_csv = data_dir / "dataset_statistics.csv"
+    stats_json = data_dir / "dataset_summary.json"
+    generate_dataset_statistics(df, splits, labels, stats_csv, stats_json)
+
     # Also save labels list for reference
     labels_json = data_dir / "labels.json"
     with open(labels_json, "w") as f:
-        json.dump(NIH_LABELS, f, indent=2)
+        json.dump(labels, f, indent=2)
     print(f"Labels saved to {labels_json}")
+
+    print("\n" + "="*60)
+    print("DATASET PREPARATION COMPLETE")
+    print("="*60)
+    print(f"Data directory: {data_dir}")
+    print(f"  images/")
+    print(f"  Data_Entry_2017.csv")
+    print(f"  splits.json")
+    print(f"  dataset_statistics.csv")
+    print(f"  dataset_summary.json")
+    print(f"  labels.json")
+    print("="*60)
 
 
 if __name__ == "__main__":

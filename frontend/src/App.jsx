@@ -1,14 +1,20 @@
+import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { AuthProvider, useAuth } from './context/AuthContext'
+import { AuthProvider } from './context/AuthContext'
+import { useAuth } from './context/useAuth'
 import { ToastProvider } from './context/ToastContext'
 import Layout from './components/layout/Layout'
 import LandingPage from './pages/LandingPage'
 import LoginPage from './pages/LoginPage'
-import DashboardPage from './pages/DashboardPage'
-import EscaneoPage from './pages/EscaneoPage'
-import InformePage from './pages/InformePage'
-import PacientesPage from './pages/PacientesPage'
-import AdminUsuariosPage from './pages/AdminUsuariosPage'
+const PasswordResetPage = lazy(() => import('./pages/PasswordResetPage'))
+const DashboardPage = lazy(() => import('./pages/DashboardPage'))
+const EscaneoPage = lazy(() => import('./pages/EscaneoPage'))
+const AnalisisPage = lazy(() => import('./pages/AnalisisPage'))
+const InformePage = lazy(() => import('./pages/InformePage'))
+const PacientesPage = lazy(() => import('./pages/PacientesPage'))
+const EstudiosPage = lazy(() => import('./pages/EstudiosPage'))
+const ActividadPage = lazy(() => import('./pages/ActividadPage'))
+const AdminUsuariosPage = lazy(() => import('./pages/AdminUsuariosPage'))
 
 function ProtectedRoute({ children, roles }) {
   const { isAuth, rol } = useAuth()
@@ -18,19 +24,22 @@ function ProtectedRoute({ children, roles }) {
 }
 
 function AppRoutes() {
-  const { isAuth } = useAuth()
+  const { isAuth, ready } = useAuth()
+  if (!ready) return <div role="status" className="p-8 text-center">Comprobando sesión…</div>
   return (
     <Routes>
       {/* Públicas */}
       <Route path="/" element={<LandingPage />} />
       <Route path="/login" element={isAuth ? <Navigate to="/dashboard" replace /> : <LoginPage />} />
 
+      <Route path="/recuperar-contrasena" element={<PasswordResetPage />} />
+
       {/* Protegidas */}
       <Route path="/dashboard" element={
         <ProtectedRoute><Layout><DashboardPage /></Layout></ProtectedRoute>
       } />
       <Route path="/escaneo" element={
-        <ProtectedRoute><Layout><EscaneoPage /></Layout></ProtectedRoute>
+        <ProtectedRoute roles={['recepcionista', 'medico']}><Layout><EscaneoPage /></Layout></ProtectedRoute>
       } />
       <Route path="/informes/:id" element={
         <ProtectedRoute roles={['medico']}><Layout><InformePage /></Layout></ProtectedRoute>
@@ -39,13 +48,15 @@ function AppRoutes() {
         <ProtectedRoute roles={['medico']}><Layout><InformePage /></Layout></ProtectedRoute>
       } />
       <Route path="/pacientes" element={
-        <ProtectedRoute><Layout><PacientesPage /></Layout></ProtectedRoute
+        <ProtectedRoute><Layout><PacientesPage /></Layout></ProtectedRoute>
       } />
       <Route path="/admin/usuarios" element={
         <ProtectedRoute roles={['administrador']}><Layout><AdminUsuariosPage /></Layout></ProtectedRoute>
       } />
-      {/* /estudios redirige a escaneo (no hay página de lista separada aún) */}
-      <Route path="/estudios" element={<Navigate to="/escaneo" replace />} />
+      <Route path="/analisis/:id" element={<ProtectedRoute><Layout><AnalisisPage /></Layout></ProtectedRoute>} />
+      <Route path="/estudios" element={<ProtectedRoute><Layout><EstudiosPage /></Layout></ProtectedRoute>} />
+      <Route path="/pendientes" element={<ProtectedRoute><Layout><EstudiosPage pending /></Layout></ProtectedRoute>} />
+      <Route path="/actividad" element={<ProtectedRoute><Layout><ActividadPage /></Layout></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
@@ -56,7 +67,7 @@ export default function App() {
     <BrowserRouter>
       <AuthProvider>
         <ToastProvider>
-          <AppRoutes />
+          <Suspense fallback={<div role="status" className="p-8 text-center">Cargando página…</div>}><AppRoutes /></Suspense>
         </ToastProvider>
       </AuthProvider>
     </BrowserRouter>

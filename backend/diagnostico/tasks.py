@@ -4,6 +4,8 @@ from celery import shared_task
 
 from estudios.models import ImagenDICOM
 from .models import ResultadoCNN
+from .results import probabilities_es
+from neorx.models import log_audit
 from .services import DetectorTorax
 
 logger = logging.getLogger(__name__)
@@ -30,16 +32,18 @@ def procesar_imagen_cnn(self, imagen_id):
 
         res_cnn, _ = ResultadoCNN.objects.update_or_create(
             imagen=imagen,
-            defaults={'patologias': resultado, 'tiempo_inferencia_seg': tiempo},
+            defaults={'patologias': probabilities_es(resultado), 'tiempo_inferencia_seg': tiempo},
         )
         imagen.estado_procesamiento = 'procesado'
         imagen.save()
 
+        log_audit(None, action="process", resource_type="resultado_cnn", resource_id=str(res_cnn.pk),
+                  metadata={"imagen_id": imagen_id, "estado": "procesado"})
         logger.info(f"[CNN TASK {self.request.id}] Completado en {tiempo}s")
         return {
             'imagen_id': imagen_id,
             'resultado_id': res_cnn.id,
-            'patologias': resultado,
+            'patologias': probabilities_es(resultado),
             'tiempo_inferencia_seg': tiempo,
         }
 

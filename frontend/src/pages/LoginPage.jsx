@@ -2,25 +2,28 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { Wind, Eye, EyeOff, LogIn } from 'lucide-react'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/useAuth'
+import PasswordResetDialog from '../components/auth/PasswordResetDialog'
 
 export default function LoginPage() {
   const { login } = useAuth()
   const navigate = useNavigate()
   const [form, setForm] = useState({ username: '', password: '' })
+  const [remember, setRemember] = useState(false)
   const [showPass, setShowPass] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [resetOpen, setResetOpen] = useState(false)
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
     setLoading(true)
     try {
-      await login(form.username, form.password)
+      await login(form.username, form.password, remember)
       navigate('/dashboard')
     } catch {
-      setError('Credenciales incorrectas. Verifique usuario y contraseña.')
+      setError('Credenciales incorrectas. Verifica tu usuario o correo y contraseña.')
     } finally {
       setLoading(false)
     }
@@ -63,7 +66,7 @@ export default function LoginPage() {
             <div className="mt-8 flex flex-col gap-2 text-left max-w-xs mx-auto">
               {[
                 'ResNet-50 · 25.5M parámetros',
-                '>112,000 radiografías de entrenamiento',
+                'Acceso seguro según el rol del usuario',
                 'Grad-CAM para explicabilidad',
                 'PadChest · NIH · RSNA · SIIM · VinBigData',
               ].map((line) => (
@@ -116,7 +119,7 @@ export default function LoginPage() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="font-body text-sm font-semibold text-navy block mb-1.5" htmlFor="username">
-                Usuario
+                Usuario o correo electrónico
               </label>
               <input
                 id="username"
@@ -127,7 +130,7 @@ export default function LoginPage() {
                 className="w-full px-4 py-3 rounded-xl border border-slate-200 font-body text-sm text-navy
                   focus:outline-none focus:ring-2 focus:ring-teal-med/40 focus:border-teal-med
                   transition-all placeholder:text-slate-400"
-                placeholder="nombre.usuario"
+                placeholder="nombre.usuario o correo@dominio.com"
                 required
               />
             </div>
@@ -160,6 +163,10 @@ export default function LoginPage() {
               </div>
             </div>
 
+            <div className="flex items-center justify-between gap-3 text-sm">
+              <label className="flex items-center gap-2 min-h-11"><input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} />Recuérdame</label>
+              <button type="button" onClick={() => setResetOpen(true)} className="text-sky-800 underline underline-offset-4">¿Olvidaste tu contraseña?</button>
+            </div>
             <button
               type="submit"
               disabled={loading}
@@ -182,6 +189,7 @@ export default function LoginPage() {
           </p>
         </motion.div>
       </div>
+      {resetOpen && <PasswordResetDialog onClose={() => setResetOpen(false)}/>}
     </div>
   )
 }

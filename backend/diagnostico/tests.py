@@ -3,6 +3,8 @@ Tests unitarios para app diagnostico.
 """
 
 import pytest
+import numpy as np
+import torch
 from unittest.mock import patch, MagicMock
 from django.urls import reverse
 from rest_framework import status
@@ -57,15 +59,17 @@ class TestDetectorTorax:
 
         mock_model = MagicMock()
         mock_model.pathologies = ["Pneumonia", "Effusion", "Atelectasis"]
-        mock_model.return_value = [[0.8, 0.1, 0.05]]
+        mock_model.return_value = torch.tensor([[0.8, 0.1, 0.05]])
+        DetectorTorax._transform = lambda value: value
+        DetectorTorax._labels_es = {"Pneumonia": "Neumonía", "Effusion": "Derrame pleural", "Atelectasis": "Atelectasia"}
         mock_cargar.return_value = mock_model
 
         img = np.random.rand(512, 512).astype(np.float32)
         resultado = DetectorTorax.predecir(img, 255.0)
 
-        assert "Neumonía" in resultado
-        assert resultado["Neumonía"] == 0.8
-        assert resultado["Derrame pleural"] == 0.1
+        assert resultado["probabilidades"]["Pneumonia"] == pytest.approx(0.8)
+        assert resultado["probabilidades"]["Effusion"] == pytest.approx(0.1)
+        assert resultado["hallazgos"][0]["etiqueta"] == "Neumonía"
 
 
 class TestDiagnosticoAPI:
@@ -123,23 +127,25 @@ class TestDiagnosticoAPI:
 
     def test_gradcam_view(self, auth_client, estudio_con_imagen):
         with patch("diagnostico.views.DetectorTorax.cargar") as mock_cargar, \
-             patch("diagnostico.views.GeneradorGradCAM.calcular") as mock_calcular, \
-             patch("diagnostico.views.GeneradorGradCAM.get_centroide") as mock_centroide, \
-             patch("diagnostico.views.GeneradorGradCAM.overlay_base64") as mock_overlay, \
-             patch("diagnostico.views.GeneradorGradCAM.overlay_solo_heatmap_base64") as mock_solo:
+             patch("diagnostico.gradcam.GeneradorGradCAM.calcular") as mock_calcular, \
+             patch("diagnostico.gradcam.GeneradorGradCAM.get_centroide") as mock_centroide, \
+             patch("diagnostico.gradcam.GeneradorGradCAM.overlay_base64") as mock_overlay, \
+             patch("diagnostico.gradcam.GeneradorGradCAM.overlay_solo_heatmap_base64") as mock_solo:
 
-            from diagnostico.services import PATOLOGIAS_NEUMOLOGIA
+            from diagnostico.services import PATOLOGIAS_NEUMOLOGIA_BASELINE as PATOLOGIAS_NEUMOLOGIA
             mock_model = MagicMock()
             mock_model.pathologies = list(PATOLOGIAS_NEUMOLOGIA.keys())
             mock_cargar.return_value = mock_model
 
+            from types import SimpleNamespace
             mock_calcular.return_value = np.random.rand(512, 512).astype(np.float32)
             mock_centroide.return_value = {"x": 256, "y": 256}
             mock_overlay.return_value = "data:image/png;base64,mock"
             mock_solo.return_value = "data:image/png;base64,mock"
 
             url = reverse("gradcam")
-            response = auth_client.get(url, {"imagen_id": estudio_con_imagen.id})
+            with patch("estudios.utils.leer_dicom", return_value=SimpleNamespace(pixel_array=np.zeros((64,64)), BitsStored=8)), patch("diagnostico.services.DetectorTorax._preprocesar", return_value=torch.zeros(1,1,64,64)):
+                response = auth_client.get(url, {"imagen_id": estudio_con_imagen.id})
             assert response.status_code == status.HTTP_200_OK
             data = response.json()
             assert "overlay" in data
@@ -150,9 +156,9 @@ class TestDiagnosticoAPI:
         response = auth_client.get(url)
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
-        assert "niveles_generales" in data
-        assert "alto" in data["niveles_generales"]
-        assert "umbrales_por_patologia" in data
+        assert "niveles_visuales_generales" in data
+        assert "alto" in data["niveles_visuales_generales"]
+        assert "umbrales_visuales_por_patologia" in data
 
 
 class TestNivelesClinicos:
@@ -183,26 +189,28 @@ class TestNivelesClinicos:
         assert nivel.color == "slate"
 
     def test_umbrales_especificos_patologia(self):
-        from diagnostico.niveles import obtener_umbrales, clasificar_probabilidad
-        # Neumonía tiene umbrales más conservadores
-        u = obtener_umbrales("Neumonía")
+        from diagnostico.niveles import obtener_umbrales_visuales, clasificar_para_visualizacion
+        # Neumonía tiene umbrales visuales más conservadores
+        u = obtener_umbrales_visuales("Neumonía")
         assert u["alto"] == 0.60
         assert u["moderado"] == 0.35
         assert u["leve"] == 0.15
 
         # Neumotórax es más crítico
-        u = obtener_umbrales("Neumotórax")
+        u = obtener_umbrales_visuales("Neumotórax")
         assert u["alto"] == 0.70
         assert u["moderado"] == 0.45
 
     def test_clasificar_todas(self):
-        from diagnostico.niveles import clasificar_todas
+        from diagnostico.niveles import clasificar_todas_para_visualizacion
         patologias = {
             "Neumonía": 0.85,
             "Derrame pleural": 0.30,
             "Atelectasia": 0.10,
         }
-        resultado = clasificar_todas(patologias)
+        resultado = clasificar_todas_para_visualizacion(patologias)
         assert resultado["Neumonía"]["nivel"] == "alto"
-        assert resultado["Derrame pleural"]["nivel"] == "moderado"
+        # Derrame pleural: umbrales visuales alto=0.65, moderado=0.40, leve=0.20
+        # 0.30 cae en "leve" según la configuración visual actual
+        assert resultado["Derrame pleural"]["nivel"] == "leve"
         assert resultado["Atelectasia"]["nivel"] == "marginal"

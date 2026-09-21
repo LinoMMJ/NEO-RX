@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import { UploadCloud, FileCheck, X } from 'lucide-react'
+import { UploadCloud, FileCheck } from 'lucide-react'
 
 export default function ZonaUpload({ onArchivo, archivo }) {
   const inputRef = useRef(null)
@@ -80,8 +80,8 @@ export default function ZonaUpload({ onArchivo, archivo }) {
             Formatos aceptados: .dcm · .dicom · .png · .jpg
           </p>
           <p className="font-body text-xs text-slate-400 mt-4 text-center max-w-xs">
-            El sistema usará ResNet-50 entrenado en más de 112,000 radiografías
-            para detectar patologías pulmonares
+            Las imágenes se vinculan al paciente seleccionado.
+            El análisis automatizado requiere revisión médica.
           </p>
         </>
       )}

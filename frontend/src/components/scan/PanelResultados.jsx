@@ -3,15 +3,15 @@ import { Brain, Download } from 'lucide-react'
 import ListaPatologias from './ListaPatologias'
 import VisorImagen from './VisorImagen'
 import Button from '../ui/Button'
-import { useAuth } from '../../context/AuthContext'
-import { useToast } from '../../context/ToastContext'
+import { useAuth } from '../../context/useAuth'
+import { useToast } from '../../context/useToast'
 import { generarInforme } from '../../api/informes'
 import { useState } from 'react'
 
 export default function PanelResultados({
   resultado, gradCAM, gradCAMCargando, gradCAMError,
   onPatologiaChange, patologiaSeleccionada,
-  estudioId, onInformeGenerado,
+  estudioId, informeId, onInformeGenerado,
 }) {
   const { rol } = useAuth()
   const toast = useToast()
@@ -78,7 +78,7 @@ export default function PanelResultados({
             <span className="text-slate-400">Parámetros</span><span className="font-mono">25.5M</span>
             <span className="text-slate-400">Tiempo inferencia</span><span className="font-mono">{resultado?.tiempo_inferencia_seg}s</span>
             <span className="text-slate-400">Resolución</span><span className="font-mono">512×512 px</span>
-            <span className="text-slate-400">Radiografías entrenamiento</span><span className="font-mono">&gt;112,000</span>
+            <span className="text-slate-400">Estado del análisis</span><span className="font-mono">Experimental</span>
             <span className="text-slate-400">Datasets</span><span>PadChest · NIH · RSNA · SIIM · VinBigData</span>
             <span className="text-slate-400">Visualización</span><span>Grad-CAM (layer4)</span>
           </div>
@@ -91,11 +91,12 @@ export default function PanelResultados({
 
         {/* Acciones */}
         <div className="flex gap-3">
-          {rol === 'medico' && (
+          {rol === 'medico' && !informeId && (
             <Button variant="primary" loading={generando} onClick={handleGenerarInforme} className="flex-1">
               Generar informe preliminar
             </Button>
           )}
+          {rol === 'medico' && informeId && <Button variant="primary" onClick={() => onInformeGenerado?.({id:informeId})}>Abrir informe</Button>}
           <Button variant="secondary" onClick={handleDescargar}>
             <Download className="w-4 h-4" /> JSON
           </Button>

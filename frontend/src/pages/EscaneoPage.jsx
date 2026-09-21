@@ -1,11 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { AlertTriangle } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import { uploadDicom, getGradCAM, obtenerEstadoTarea } from '../api/estudios'
-import { createEstudio } from '../api/pacientes'
-import { useToast } from '../context/ToastContext'
+import { createEstudio, getPaciente } from '../api/pacientes'
+import { useToast } from '../context/useToast'
 
 import ZonaUpload from '../components/scan/ZonaUpload'
 import AnimacionCNN from '../components/scan/AnimacionCNN'
@@ -13,6 +13,7 @@ import PanelResultados from '../components/scan/PanelResultados'
 import BuscadorPaciente from '../components/scan/BuscadorPaciente'
 import ProyeccionBadge from '../components/scan/ProyeccionBadge'
 import Button from '../components/ui/Button'
+import useObjectUrl from '../hooks/useObjectUrl'
 
 // Reverse map español → inglés para Grad-CAM
 const ES_A_EN = {
@@ -34,11 +35,14 @@ const ES_A_EN = {
 
 export default function EscaneoPage() {
   const navigate = useNavigate()
+  const [query] = useSearchParams()
+  const pacienteId = query.get('paciente')
   const toast = useToast()
   const [fase, setFase] = useState('upload')   // upload | procesando | resultados | borrosidad
   const [archivo, setArchivo] = useState(null)
 
   const [paciente, setPaciente] = useState(null)
+  useEffect(() => {if(!pacienteId)return;let active=true;getPaciente(pacienteId).then(({data})=>{if(active)setPaciente(data)}).catch(()=>{});return ()=>{active=false}},[pacienteId])
   const [observaciones, setObservaciones] = useState('')
   const [proyeccion, setProyeccion] = useState(null)   // detectada tras el upload
 
@@ -49,12 +53,12 @@ export default function EscaneoPage() {
   const [gradCAMError, setGradCAMError] = useState(false)
   const [patologiaSeleccionada, setPatologiaSeleccionada] = useState(null)
   const [estudioId, setEstudioId] = useState(null)
+  const draftStudy = useRef(null)
   const [progreso, setProgreso] = useState(0)
 
   // Animación de progreso simulado — llega a 85% máx y espera respuesta del backend
   useEffect(() => {
     if (fase !== 'procesando') return
-    setProgreso(0)
     const intervalos = [
       setTimeout(() => setProgreso(15), 600),
       setTimeout(() => setProgreso(35), 1800),
@@ -69,7 +73,7 @@ export default function EscaneoPage() {
   const pacienteValido = !!paciente
 
   // Imagen preview para AnimacionCNN
-  const imagenPreviewUrl = archivo ? URL.createObjectURL(archivo) : null
+  const imagenPreviewUrl = useObjectUrl(archivo)
 
   // Carga Grad-CAM (timeout 2min configurado en axios); si falla marca error sin romper UI
   const cargarGradCAM = (imagenId, englishName) => {
@@ -118,23 +122,29 @@ export default function EscaneoPage() {
 
   const handleIniciarAnalisis = async () => {
     if (!archivo || !pacienteValido) return
+    setProgreso(0)
     setFase('procesando')
     setProgreso(5)
 
     try {
       // 1. Crear estudio (la proyección la detecta el backend tras el upload)
-      const { data: est } = await createEstudio({
-        paciente: paciente.id,
-        fecha: new Date().toISOString().split('T')[0],
-        tipo_estudio: 'Radiografía de Tórax',
-        observaciones,
-      })
-      setEstudioId(est.id)
+      let currentId = draftStudy.current?.patientId === paciente.id ? draftStudy.current.id : null
+      if (!currentId) {
+        const { data: est } = await createEstudio({
+          paciente: paciente.id,
+          fecha: new Date().toISOString().split('T')[0],
+          tipo_estudio: 'Radiografía de Tórax',
+          observaciones,
+        })
+        currentId = est.id
+        draftStudy.current = { id: currentId, patientId: paciente.id }
+      }
+      setEstudioId(currentId)
 
       // 2. Upload DICOM/PNG + análisis CNN
       const formData = new FormData()
       formData.append('archivo', archivo)
-      formData.append('estudio_id', est.id)
+      formData.append('estudio_id', currentId)
 
       const { data } = await uploadDicom(formData, (e) => {
         if (e.total) setProgreso(5 + Math.round((e.loaded / e.total) * 15))
@@ -180,7 +190,8 @@ export default function EscaneoPage() {
     cargarGradCAM(resultado.imagen_id, englishName)
   }
 
-  const reiniciar = () => {
+  const reiniciar = ({ reuse = false } = {}) => {
+    if (!reuse) draftStudy.current = null
     setFase('upload'); setArchivo(null); setResultado(null)
     setGradCAM(null); setGradCAMError(false); setProyeccion(null)
   }
@@ -188,8 +199,8 @@ export default function EscaneoPage() {
   return (
     <div className="max-w-6xl mx-auto">
       <div className="mb-6">
-        <h1 className="font-heading font-bold text-navy text-3xl tracking-tight">Nuevo Escaneo</h1>
-        <p className="font-body text-slate-500 text-sm mt-1">Análisis radiológico con CNN ResNet-50</p>
+        <h1 className="font-heading font-bold text-navy text-3xl tracking-tight">Nuevo estudio</h1>
+        <p className="font-body text-slate-500 text-sm mt-1">Carga de radiografía y análisis asistido; la interpretación médica requiere revisión profesional.</p>
       </div>
 
       <AnimatePresence mode="wait">
@@ -221,7 +232,7 @@ export default function EscaneoPage() {
                   <label className="font-body text-xs font-semibold text-slate-500 block mb-1">
                     Observaciones (opcional)
                   </label>
-                  <textarea
+                  <textarea id="scan-observaciones" aria-label="Observaciones clínicas"
                     value={observaciones}
                     onChange={(e) => setObservaciones(e.target.value)}
                     rows={2}
@@ -243,7 +254,7 @@ export default function EscaneoPage() {
                 disabled={!archivo || !pacienteValido}
                 onClick={handleIniciarAnalisis}
               >
-                Iniciar Análisis CNN
+                Analizar radiografía
               </Button>
 
               {(!archivo || !pacienteValido) && (
@@ -287,7 +298,7 @@ export default function EscaneoPage() {
                 Esta imagen no es apta para diagnóstico por IA.
                 Solicite una nueva toma con menor movimiento del paciente.
               </p>
-              <Button variant="secondary" onClick={reiniciar}>
+              <Button variant="secondary" onClick={() => reiniciar({ reuse: true })}>
                 Intentar con nueva imagen
               </Button>
             </div>

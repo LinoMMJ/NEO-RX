@@ -1,6 +1,8 @@
 from rest_framework import serializers
 from estudios.models import ImagenDICOM
 from .models import InformePreliminar
+from rest_framework.exceptions import ValidationError
+from diagnostico.results import probabilities_es
 
 
 class InformePreliminarSerializer(serializers.ModelSerializer):
@@ -15,7 +17,15 @@ class InformePreliminarSerializer(serializers.ModelSerializer):
     class Meta:
         model = InformePreliminar
         fields = "__all__"
-        read_only_fields = ("id", "medico", "fecha_creacion", "fecha_firmado")
+        read_only_fields = ("id", "estudio", "medico", "fecha_creacion", "fecha_firmado")
+
+    def validate(self, attrs):
+        if self.instance and self.instance.estado == "firmado":
+            raise ValidationError("Un informe firmado no puede modificarse.")
+        state = attrs.get("estado")
+        if state == "firmado" and self.instance and self.instance.estado != "revisado":
+            raise ValidationError("El informe debe estar revisado antes de firmarse.")
+        return attrs
 
     def _imagen(self, obj):
         return (
@@ -47,7 +57,7 @@ class InformePreliminarSerializer(serializers.ModelSerializer):
     def get_probabilidades(self, obj):
         img = self._imagen(obj)
         resultado = getattr(img, "resultado_cnn", None) if img else None
-        return resultado.patologias if resultado else {}
+        return probabilities_es(resultado.patologias) if resultado else {}
 
     def get_imagen_png_url(self, obj):
         img = self._imagen(obj)

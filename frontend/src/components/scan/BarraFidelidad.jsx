@@ -15,13 +15,6 @@ const NIVEL_LABELS = {
   marginal: 'MARGINAL',
 }
 
-const NIVEL_COLORS = {
-  alto: 'danger',
-  moderado: 'orange',
-  leve: 'warning',
-  marginal: 'slate',
-}
-
 function getBarColor(nivel) {
   switch (nivel) {
     case 'alto':      return 'from-danger to-rose-500'
@@ -32,16 +25,13 @@ function getBarColor(nivel) {
 }
 
 function getTextColor(nivel) {
-  return `text-${NIVEL_COLORS[nivel] || 'slate'}-400`
+  return {alto: 'text-red-700', moderado: 'text-orange-700', leve: 'text-amber-800', marginal: 'text-slate-600'}[nivel] || 'text-slate-600'
 }
-
 function getBgColor(nivel) {
-  return `${NIVEL_COLORS[nivel] || 'slate'} bg-current/10`
+  return {alto: 'bg-red-50', moderado: 'bg-orange-50', leve: 'bg-amber-50', marginal: 'bg-slate-100'}[nivel] || 'bg-slate-100'
 }
 
 export default function BarraFidelidad({ patologiaPrincipal, probabilidad, tiempoInferencia }) {
-  if (probabilidad == null) return null
-  const pct = Math.round(probabilidad * 100)
   const [nivelesConfig, setNivelesConfig] = useState(null)
 
   // Cargar config de niveles (cacheable)
@@ -50,6 +40,9 @@ export default function BarraFidelidad({ patologiaPrincipal, probabilidad, tiemp
       .then(res => setNivelesConfig(res.data))
       .catch(err => console.warn('[BarraFidelidad] Niveles no cargados, usando fallback:', err))
   }, [])
+
+  if (probabilidad == null) return null
+  const pct = Math.round(probabilidad * 100)
 
   // Clasificar usando backend config o fallback
   const nivel = (() => {

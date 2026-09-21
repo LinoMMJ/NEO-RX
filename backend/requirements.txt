@@ -4,7 +4,6 @@ charset-normalizer==3.4.7
 colorama==0.4.6
 Django==5.2.14
 django-cors-headers==4.9.0
-django-cryptography==1.1.0
 django-ratelimit==4.1.0
 djangorestframework==3.17.1
 djangorestframework-simplejwt==5.5.1
@@ -42,5 +41,16 @@ tqdm==4.67.3
 typing_extensions==4.15.0
 tzdata==2026.2
 urllib3==2.7.0
-weasyprint==62.0
-xhtml2pdf==0.2.18
+gunicorn==23.0.0
+reportlab==5.0.1
+django-filter==26.1
+django-extensions==4.1
+celery==5.6.3
+redis==8.1.0
+pytest==9.1.1
+pytest-django==4.14.0
+pypdf==6.18.1
+cryptography==50.0.1
+
+# Structured request logging
+python-json-logger==3.3.0

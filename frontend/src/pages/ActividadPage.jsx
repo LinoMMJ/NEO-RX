@@ -1,0 +1,14 @@
+import {useState} from 'react'
+import {useAuth} from '../context/useAuth'
+import {useFilters,useResource} from '../hooks/useWorkspace'
+import {Filter,ResetFilters,Pagination,ResourceState} from '../components/ui/WorkspaceUI'
+const actions={create:'Creación',read:'Consulta',update:'Actualización',delete:'Eliminación',login:'Inicio de sesión',logout:'Cierre de sesión',export:'Exportación',firmar:'Firma médica',diagnostico:'Diagnóstico',gradcam:'Grad-CAM',process:'Procesamiento',validate:'Validación',login_failed:'Acceso fallido'}
+export default function ActividadPage() {
+  const {rol}=useAuth(), {filters,setFilter,reset}=useFilters({page:'1',page_size:'20'})
+  const [revision,setRevision]=useState(0)
+  const {data,loading,error}=useResource('/actividad/',filters,revision), rows=data?.results || []
+  return <div className="workspace"><header className="page-heading"><div><h1>Historial de movimientos</h1><p>{rol==='administrador' ? 'Actividad registrada de todos los usuarios del sistema.' : 'Su actividad registrada en el sistema.'} Los datos clínicos y las credenciales no se muestran aquí.</p></div></header>
+    <section className="filters" aria-label="Filtros de movimientos"><Filter label="Buscar" name="search" value={filters.search} onChange={setFilter} placeholder="Usuario, recurso o identificador"/><Filter label="Acción" name="action" value={filters.action} onChange={setFilter}><option value="">Todas</option>{Object.entries(actions).map(([v,l])=><option key={v} value={v}>{l}</option>)}</Filter><Filter label="Recurso" name="resource_type" value={filters.resource_type} onChange={setFilter}><option value="">Todos</option>{['paciente','estudio','informe','usuario','imagen_dicom','password_reset'].map(v=><option value={v} key={v}>{v}</option>)}</Filter><Filter label="Desde" name="fecha_desde" type="date" value={filters.fecha_desde} onChange={setFilter}/><Filter label="Hasta" name="fecha_hasta" type="date" value={filters.fecha_hasta} onChange={setFilter}/><ResetFilters onClick={reset}/></section>
+    <ResourceState loading={loading} error={error} empty={!rows.length} onRetry={()=>setRevision(v=>v+1)}><section className="panel"><div className="table-scroll"><table className="data-table"><thead><tr>{['Fecha y hora','Usuario','Rol','Movimiento','Recurso'].map(v=><th scope="col" key={v}>{v}</th>)}</tr></thead><tbody>{rows.map(row=><tr key={row.id}><td className="whitespace-nowrap">{new Date(row.timestamp).toLocaleString('es-BO')}</td><td className="font-semibold">{row.actor}</td><td>{row.user_role || 'Sistema'}</td><td>{actions[row.action] || row.action}</td><td>{row.resource_type} {row.resource_id && `#${row.resource_id}`}</td></tr>)}</tbody></table></div><Pagination page={filters.page} pageSize={filters.page_size} total={data?.count || 0} onChange={setFilter}/></section></ResourceState>
+  </div>
+}

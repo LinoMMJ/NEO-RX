@@ -1,287 +1,226 @@
-{% load static %}
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Informe Radiológico - {{ paciente.ci }}</title>
+    <title>Informe Radiológico - {{ informe.estudio }}</title>
     <style>
         @page {
             size: A4;
             margin: 2cm 2.5cm;
-            @top-center {
-                content: "NEO RAYOS X DIGITAL - Informe Preliminar de Radiografía de Tórax";
-                font-family: 'DejaVu Sans', sans-serif;
-                font-size: 9pt;
-                color: #333;
-            }
             @bottom-center {
                 content: "Página " counter(page) " de " counter(pages);
-                font-family: 'DejaVu Sans', sans-serif;
-                font-size: 8pt;
+                font-size: 9pt;
                 color: #666;
             }
         }
-        * { box-sizing: border-box; }
         body {
-            font-family: 'DejaVu Sans', 'Helvetica Neue', Arial, sans-serif;
+            font-family: "DejaVu Sans", "Liberation Sans", Arial, sans-serif;
             font-size: 11pt;
             line-height: 1.5;
-            color: #222;
+            color: #1a1a1a;
             margin: 0;
             padding: 0;
         }
         .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            border-bottom: 2px solid #1e3a5f;
+            border-bottom: 2px solid #0d9488;
             padding-bottom: 12px;
             margin-bottom: 20px;
         }
-        .logo-section {
-            flex: 1;
+        .header-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 10px;
         }
-        .logo-title {
-            font-size: 18pt;
-            font-weight: 700;
-            color: #1e3a5f;
+        .logo {
+            width: 60px;
+            height: 60px;
+        }
+        .title-block h1 {
             margin: 0;
+            font-size: 20pt;
+            color: #0d9488;
+            font-weight: 700;
         }
-        .logo-subtitle {
+        .title-block p {
+            margin: 4px 0 0;
             font-size: 10pt;
-            color: #555;
-            margin: 2px 0 0;
+            color: #64748b;
         }
-        .info-section {
-            flex: 1;
-            text-align: right;
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px 20px;
+            font-size: 10pt;
+            margin-bottom: 10px;
+        }
+        .info-item {
+            display: flex;
+            gap: 8px;
         }
         .info-label {
-            font-size: 8pt;
-            text-transform: uppercase;
-            color: #888;
-            letter-spacing: 0.5px;
+            font-weight: 600;
+            color: #374151;
+            min-width: 120px;
         }
         .info-value {
-            font-size: 11pt;
-            font-weight: 600;
-            color: #222;
-        }
-        .patient-card {
-            background: #f8fafc;
-            border: 1px solid #e2e8f0;
-            border-radius: 8px;
-            padding: 16px;
-            margin-bottom: 20px;
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 12px;
-        }
-        .patient-field {
-            display: flex;
-            flex-direction: column;
-        }
-        .patient-field .label {
-            font-size: 7.5pt;
-            text-transform: uppercase;
-            color: #64748b;
-            letter-spacing: 0.5px;
-        }
-        .patient-field .value {
-            font-size: 10.5pt;
-            font-weight: 600;
-            color: #1e293b;
+            color: #1f2937;
         }
         .section {
-            margin-bottom: 20px;
+            margin-bottom: 18px;
         }
         .section-title {
             font-size: 11pt;
             font-weight: 700;
-            color: #1e3a5f;
+            color: #0d9488;
+            border-bottom: 1px solid #e2e8f0;
+            padding-bottom: 4px;
+            margin-bottom: 8px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
-            border-bottom: 1px solid #e2e8f0;
-            padding-bottom: 6px;
-            margin-bottom: 12px;
         }
         .section-content {
-            white-space: pre-wrap;
             font-size: 10.5pt;
             line-height: 1.6;
-            color: #334155;
+            white-space: pre-wrap;
+            color: #1f2937;
         }
-        .findings-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 16px;
-        }
-        .finding-item {
-            background: #f8fafc;
-            border-left: 3px solid #1e3a5f;
-            padding: 10px 14px;
-            border-radius: 0 6px 6px 0;
-        }
-        .finding-label {
-            font-size: 8.5pt;
-            font-weight: 700;
-            color: #1e3a5f;
-            text-transform: uppercase;
-            margin-bottom: 4px;
-        }
-        .finding-text {
-            font-size: 10pt;
-            color: #334155;
-        }
-        .signature-block {
-            margin-top: 40px;
-            padding-top: 20px;
-            border-top: 1px solid #cbd5e1;
-            display: flex;
-            justify-content: space-between;
-        }
-        .signature-box {
+        .footer {
+            margin-top: 30px;
+            padding-top: 15px;
+            border-top: 1px solid #e2e8f0;
+            font-size: 9pt;
+            color: #64748b;
             text-align: center;
-            width: 45%;
+        }
+        .warning-box {
+            background: #fef3c7;
+            border: 1px solid #f59e0b;
+            border-radius: 6px;
+            padding: 12px;
+            margin-top: 20px;
+            font-size: 9.5pt;
+            color: #92400e;
         }
         .signature-line {
-            border-top: 1px solid #334155;
-            width: 100%;
             margin-top: 40px;
-            padding-top: 6px;
+            padding-top: 20px;
+            border-top: 1px dashed #94a3b8;
+        }
+        .signature-block {
+            display: inline-block;
+            text-align: center;
+            min-width: 250px;
         }
         .signature-name {
             font-weight: 600;
+            margin-top: 40px;
+            border-top: 1px solid #333;
+            padding-top: 4px;
             font-size: 10pt;
-            color: #1e293b;
         }
-        .signature-role {
-            font-size: 8.5pt;
+        .signature-title {
+            font-size: 9pt;
             color: #64748b;
-        }
-        .signature-date {
-            font-size: 8.5pt;
-            color: #64748b;
-            margin-top: 4px;
-        }
-        .disclaimer {
-            margin-top: 30px;
-            padding: 12px;
-            background: #fef3c7;
-            border: 1px solid #fcd34d;
-            border-radius: 6px;
-            font-size: 8.5pt;
-            color: #92400e;
-            line-height: 1.5;
-        }
-        .watermark {
-            position: fixed;
-            bottom: 30px;
-            right: 30px;
-            opacity: 0.05;
-            font-size: 72pt;
-            font-weight: 700;
-            color: #1e3a5f;
-            transform: rotate(-15deg);
-            pointer-events: none;
-            z-index: -1;
-        }
-        .page-break { page-break-before: always; }
-        @media print {
-            .no-print { display: none; }
         }
     </style>
 </head>
 <body>
-    <div class="watermark">NEO RX</div>
-
-    <!-- HEADER -->
     <div class="header">
-        <div class="logo-section">
-            <h1 class="logo-title">NEO RAYOS X DIGITAL</h1>
-            <p class="logo-subtitle">Centro de Diagnóstico por Imagen · La Paz, Bolivia</p>
-            <p class="logo-subtitle">Av. Arce Nº 2145 · Tel: +591 2 24XXXXX</p>
-        </div>
-        <div class="info-section">
-            <div class="info-label">Informe Nº</div>
-            <div class="info-value">{{ informe.id }}</div>
-            <div class="info-label" style="margin-top: 8px;">Fecha</div>
-            <div class="info-value">{{ fecha_hoy }}</div>
-            <div class="info-label" style="margin-top: 8px;">Estado</div>
-            <div class="info-value" style="text-transform: capitalize;">{{ informe.get_estado_display }}</div>
-        </div>
-    </div>
-
-    <!-- DATOS DEL PACIENTE -->
-    <div class="patient-card">
-        <div class="patient-field">
-            <span class="label">Paciente</span>
-            <span class="value">{{ paciente.nombres }} {{ paciente.apellidos }}</span>
-        </div>
-        <div class="patient-field">
-            <span class="label">CI</span>
-            <span class="value">{{ paciente.ci }}</span>
-        </div>
-        <div class="patient-field">
-            <span class="label">Edad / Género</span>
-            <span class="value">{{ edad }} años / {{ paciente.get_genero_display }}</span>
-        </div>
-        <div class="patient-field">
-            <span class="label">Fecha Estudio</span>
-            <span class="value">{{ estudio_fecha|date:"d/m/Y" }}</span>
+        <div class="header-top">
+            <div class="title-block">
+                <h1>INFORME RADIOLÓGICO</h1>
+                <p>Centro: Neo Rayos X Digital — La Paz, Bolivia</p>
+            </div>
+            <div style="text-align: right;">
+                <p style="margin: 0; font-size: 9pt; color: #64748b;">
+                    <strong>Fecha emisión:</strong> {{ fecha_hoy }}<br>
+                    <strong>Informe N°:</strong> {{ estudio.id }}<br>
+                    <strong>Estado:</strong> {{ informe.estado|upper }}
+                </p>
+            </div>
         </div>
     </div>
 
-    <!-- TÉCNICA -->
+    <div class="info-grid">
+        <div class="info-item">
+            <span class="info-label">Paciente:</span>
+            <span class="info-value">{{ paciente.apellidos }} {{ paciente.nombres }}</span>
+        </div>
+        <div class="info-item">
+            <span class="info-label">CI:</span>
+            <span class="info-value">{{ paciente.ci }}</span>
+        </div>
+        <div class="info-item">
+            <span class="info-label">Edad:</span>
+            <span class="info-value">{{ edad }} años</span>
+        </div>
+        <div class="info-item">
+            <span class="info-label">Sexo:</span>
+            <span class="info-value">{{ paciente.get_genero_display }}</span>
+        </div>
+        <div class="info-item">
+            <span class="info-label">Estudio:</span>
+            <span class="info-value">{{ estudio.tipo_estudio }}</span>
+        </div>
+        <div class="info-item">
+            <span class="info-label">Fecha estudio:</span>
+            <span class="info-value">{{ estudio_fecha }}</span>
+        </div>
+        <div class="info-item">
+            <span class="info-label">Proyección:</span>
+            <span class="info-value">{{ estudio.imagenes.first.tipo_proyeccion|default:"PA" }}</span>
+        </div>
+        <div class="info-item">
+            <span class="info-label">Médico:</span>
+            <span class="info-value">{{ medico_nombre|default:"—" }}</span>
+        </div>
+        <div class="info-item">
+            <span class="info-label">Fecha firma:</span>
+            <span class="info-value">{{ fecha_firmado|default:"—" }}</span>
+        </div>
+    </div>
+
     <div class="section">
-        <h2 class="section-title">TÉCNICA</h2>
+        <div class="section-title">TÉCNICA</div>
         <div class="section-content">{{ informe.tecnica }}</div>
     </div>
 
-    <!-- HALLAZGOS -->
     <div class="section">
-        <h2 class="section-title">HALLAZGOS</h2>
+        <div class="section-title">HALLAZGOS</div>
         <div class="section-content">{{ informe.hallazgos }}</div>
     </div>
 
-    <!-- IMPRESIÓN DIAGNÓSTICA -->
     <div class="section">
-        <h2 class="section-title">IMPRESIÓN DIAGNÓSTICA</h2>
+        <div class="section-title">IMPRESIÓN DIAGNÓSTICA</div>
         <div class="section-content">{{ informe.impresion }}</div>
     </div>
 
-    <!-- RECOMENDACIONES -->
     <div class="section">
-        <h2 class="section-title">RECOMENDACIONES</h2>
+        <div class="section-title">RECOMENDACIONES</div>
         <div class="section-content">{{ informe.recomendaciones }}</div>
     </div>
 
-    <!-- FIRMA -->
-    <div class="signature-block">
-        <div class="signature-box">
-            <div class="signature-line">
-                <div class="signature-name">{{ medico_nombre|default:"________________________" }}</div>
-                <div class="signature-role">Médico Radiólogo</div>
-                <div class="signature-date">{{ fecha_firmado|date:"d/m/Y H:i"|default:"________________________" }}</div>
-            </div>
-        </div>
-        <div class="signature-box">
-            <div class="signature-line">
-                <div class="signature-name">Dra./Dr. ________________________</div>
-                <div class="signature-role">Jefe de Servicio de Radiología</div>
-                <div class="signature-date">{{ fecha_hoy }}</div>
-            </div>
+    <div class="warning-box">
+        <strong>⚠ ADVERTENCIA IMPORTANTE:</strong> Este informe constituye un apoyo preliminar
+        para la interpretación radiológica basado en análisis asistido por IA (CNN ResNet-50).
+        No sustituye la evaluación, validación y firma del médico radiólogo especialista.
+        Los hallazgos y probabilidades son estimaciones asistidas por computadora y requieren
+        correlación clínica obligatoria por parte del profesional médico responsable.
+    </div>
+
+    <div class="signature-line">
+        <div class="signature-block">
+            <div class="signature-name">{{ medico_nombre|default:"Dr. Médico Radiólogo" }}</div>
+            <div class="signature-title">Médico Radiólogo Especialista</div>
+            <div class="signature-title">Neo Rayos X Digital — La Paz, Bolivia</div>
         </div>
     </div>
 
-    <!-- DISCLAIMER LEGAL -->
-    <div class="disclaimer">
-        <strong>AVISO LEGAL — Ley 3131 de Ejercicio Médico (Bolivia):</strong>
-        Este informe es un <strong>documento preliminar generado por sistema de apoyo diagnóstico (IA)</strong>
-        y <strong>NO sustituye el juicio clínico del médico radiólogo especialista</strong>.
-        Requiere validación, revisión y firma del profesional habilitado para tener validez legal.
-        La responsabilidad final del diagnóstico recae exclusivamente en el médico firmante.
+    <div class="footer">
+        <p>Informe generado automáticamente por Sistema Neo RX — Apoyo a la Interpretación Radiológica</p>
+        <p>Basado en análisis CNN ResNet-50 (torchxrayvision) — Solo para uso médico profesional</p>
+        <p>Ley 3131 — Derechos del Paciente y Responsabilidad Profesional</p>
     </div>
-
 </body>
 </html>

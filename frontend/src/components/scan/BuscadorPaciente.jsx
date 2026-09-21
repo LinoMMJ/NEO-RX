@@ -2,24 +2,16 @@ import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Search, Plus, X, UserCheck, ArrowLeft, Loader2 } from 'lucide-react'
 import { buscarPacientes, createPaciente } from '../../api/pacientes'
-import { useToast } from '../../context/ToastContext'
+import { useToast } from '../../context/useToast'
 
 const GENERO_LABEL = { M: 'Masculino', F: 'Femenino', Otro: 'Otro' }
 
-export function calcularEdad(fecha) {
-  if (!fecha) return null
-  const n = new Date(fecha)
-  if (isNaN(n)) return null
-  const hoy = new Date()
-  let edad = hoy.getFullYear() - n.getFullYear()
-  const m = hoy.getMonth() - n.getMonth()
-  if (m < 0 || (m === 0 && hoy.getDate() < n.getDate())) edad--
-  return edad
-}
+import { errorMessage, fieldErrors } from '../../api/errors'
+import { calcularEdad } from './patientUtils'
 
 // ── Reglas de validación ──
-const RE_NOMBRE = /^[A-Za-zÀ-ÿÑñ\s]+$/
-const RE_CI = /^[A-Za-z0-9]+$/
+const RE_NOMBRE = /^[\p{L}\p{M} '’-]+$/u
+const RE_CI = /^[A-Za-z0-9 ._-]+$/
 
 function validar(form) {
   const e = {}
@@ -28,8 +20,8 @@ function validar(form) {
   if (!form.apellidos.trim()) e.apellidos = 'Requerido'
   else if (!RE_NOMBRE.test(form.apellidos.trim())) e.apellidos = 'Solo letras y espacios'
   if (!form.ci.trim()) e.ci = 'Requerido'
-  else if (!RE_CI.test(form.ci.trim())) e.ci = 'Solo números y letras'
-  else if (form.ci.trim().length < 6) e.ci = 'Mínimo 6 caracteres'
+  else if (!RE_CI.test(form.ci.trim())) e.ci = 'Use letras, números, espacios o guiones'
+  else if (form.ci.trim().length > 20) e.ci = 'Máximo 20 caracteres'
   if (!form.fecha_nacimiento) e.fecha_nacimiento = 'Requerido'
   else {
     const f = new Date(form.fecha_nacimiento)
@@ -67,23 +59,19 @@ export default function BuscadorPaciente({ seleccionado, onSelect }) {
   useEffect(() => {
     if (modo !== 'buscar' || seleccionado) return
     const q = query.trim()
-    if (q.length < 2) { setResultados([]); setSinResultados(false); setAbierto(false); return }
-    setBuscando(true)
+    let active = true
     const t = setTimeout(async () => {
+      if (q.length < 2) { setResultados([]); setSinResultados(false); setAbierto(false); setBuscando(false); return }
+      setBuscando(true)
       try {
-        const { data } = await buscarPacientes(q)
+        const {data} = await buscarPacientes(q)
+        if (!active) return
         const lista = Array.isArray(data) ? data : data.results || []
-        setResultados(lista)
-        setSinResultados(lista.length === 0)
-        setAbierto(true)
-      } catch {
-        toast.red()
-        setAbierto(false)
-      } finally {
-        setBuscando(false)
-      }
+        setResultados(lista); setSinResultados(lista.length === 0); setAbierto(true)
+      } catch { if (active) {toast.red(); setAbierto(false)} }
+      finally { if (active) setBuscando(false) }
     }, 400)
-    return () => clearTimeout(t)
+    return () => {active = false; clearTimeout(t)}
   }, [query, modo, seleccionado, toast])
 
   // Cerrar dropdown al clicar fuera
@@ -102,7 +90,7 @@ export default function BuscadorPaciente({ seleccionado, onSelect }) {
   const irANuevo = () => {
     setModo('nuevo')
     setAbierto(false)
-    setForm((f) => ({ ...FORM_VACIO, nombres: '', ci: /^\d/.test(query) ? query.trim() : '' }))
+    setForm(() => ({ ...FORM_VACIO, nombres: '', ci: /^\d/.test(query) ? query.trim() : '' }))
     setErrores({}); setTocado({})
   }
 
@@ -121,7 +109,7 @@ export default function BuscadorPaciente({ seleccionado, onSelect }) {
     const e = validar(form)
     setErrores(e)
     setTocado({ nombres: true, apellidos: true, ci: true, fecha_nacimiento: true, genero: true })
-    if (Object.keys(e).length) return
+    if (Object.keys(e).length) {document.getElementById(`scan-patient-${Object.keys(e)[0]}`)?.focus(); return}
     setCreando(true)
     try {
       const { data } = await createPaciente({
@@ -135,8 +123,7 @@ export default function BuscadorPaciente({ seleccionado, onSelect }) {
       setModo('buscar')
       setForm(FORM_VACIO)
     } catch (err) {
-      const detalle = err.response?.data?.ci?.[0]
-      toast.error(detalle ? `CI: ${detalle}` : null)
+      const details = fieldErrors(err); setErrores(details); document.getElementById(`scan-patient-${Object.keys(details)[0]}`)?.focus(); toast.error(errorMessage(err))
     } finally {
       setCreando(false)
     }
@@ -169,7 +156,7 @@ export default function BuscadorPaciente({ seleccionado, onSelect }) {
           </div>
           <button
             onClick={() => onSelect(null)}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-danger hover:bg-danger/10 transition-colors cursor-pointer"
+            className="p-1.5 rounded-lg text-slate-600 hover:text-danger hover:bg-danger/10 transition-colors cursor-pointer"
             aria-label="Deseleccionar paciente"
           >
             <X className="w-4 h-4" />
@@ -184,14 +171,14 @@ export default function BuscadorPaciente({ seleccionado, onSelect }) {
     const campos = [
       { k: 'nombres', label: 'Nombres', type: 'text', ph: 'Ej: Juan Carlos' },
       { k: 'apellidos', label: 'Apellidos', type: 'text', ph: 'Ej: García López' },
-      { k: 'ci', label: 'CI', type: 'text', ph: 'Mínimo 6 caracteres', mono: true },
+      { k: 'ci', label: 'CI', type: 'text', ph: 'Número de identificación', mono: true },
       { k: 'fecha_nacimiento', label: 'Fecha de nacimiento', type: 'date' },
     ]
     return (
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-3">
         <button
           onClick={() => { setModo('buscar'); setErrores({}); setTocado({}) }}
-          className="flex items-center gap-1.5 text-xs font-semibold text-teal-med hover:underline cursor-pointer"
+          className="flex items-center gap-1.5 text-xs font-semibold text-sky-800 hover:underline cursor-pointer"
         >
           <ArrowLeft className="w-3.5 h-3.5" /> Volver a búsqueda
         </button>
@@ -202,10 +189,12 @@ export default function BuscadorPaciente({ seleccionado, onSelect }) {
 
         {campos.map(({ k, label, type, ph, mono }) => (
           <div key={k}>
-            <label className="font-body text-xs font-semibold text-slate-500 block mb-1">
+            <label htmlFor={`scan-patient-${k}`} className="label">
               {label} <span className="text-danger">*</span>
             </label>
             <input
+              id={`scan-patient-${k}`}
+              maxLength={k === "ci" ? 20 : type === "text" ? 100 : undefined}
               type={type}
               value={form[k]}
               onChange={(e) => setCampo(k, e.target.value)}
@@ -216,16 +205,17 @@ export default function BuscadorPaciente({ seleccionado, onSelect }) {
                 focus:outline-none focus:ring-2 focus:ring-teal-med/40 ${mono ? 'font-mono' : ''}
                 ${errores[k] ? 'border-danger/60 bg-danger/5' : 'border-slate-200 focus:border-teal-med'}`}
               aria-invalid={!!errores[k]}
+              aria-describedby={errores[k] ? `scan-error-${k}` : undefined}
             />
-            {errores[k] && <p className="text-[11px] text-danger font-body mt-1">{errores[k]}</p>}
+            {errores[k] && <p id={`scan-error-${k}`} className="text-sm text-red-700 mt-1">{String(errores[k])}</p>}
           </div>
         ))}
 
         <div>
-          <label className="font-body text-xs font-semibold text-slate-500 block mb-1">
+          <label htmlFor="scan-patient-genero" className="label">
             Género <span className="text-danger">*</span>
           </label>
-          <select
+          <select id="scan-patient-genero"
             value={form.genero}
             onChange={(e) => setCampo('genero', e.target.value)}
             className="w-full px-3 py-2 rounded-lg border border-slate-200 font-body text-sm
@@ -240,7 +230,7 @@ export default function BuscadorPaciente({ seleccionado, onSelect }) {
         <button
           onClick={guardar}
           disabled={creando}
-          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-teal-med text-white
+          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-sky-700 text-white
             font-heading font-semibold text-sm hover:brightness-110 transition-all cursor-pointer
             disabled:opacity-60 disabled:cursor-not-allowed"
         >
@@ -254,12 +244,13 @@ export default function BuscadorPaciente({ seleccionado, onSelect }) {
   // ── MODO BUSCAR ──
   return (
     <div ref={boxRef} className="relative">
-      <label className="font-body text-sm font-semibold text-navy block mb-1.5">
+      <label htmlFor="scan-patient-search" className="label">
         Paciente <span className="text-danger">*</span>
       </label>
       <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-        <input
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-600" />
+        <input id="scan-patient-search" aria-expanded={abierto} aria-controls="patient-search-results"
+          onKeyDown={e => {if(e.key === "Escape") setAbierto(false); if(e.key === "ArrowDown") {e.preventDefault(); boxRef.current?.querySelector("ul button")?.focus()}}}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onFocus={() => resultados.length && setAbierto(true)}
@@ -282,7 +273,7 @@ export default function BuscadorPaciente({ seleccionado, onSelect }) {
             className="absolute z-30 left-0 right-0 mt-2 bg-white rounded-xl border border-slate-200 shadow-xl overflow-hidden"
           >
             {resultados.length > 0 ? (
-              <ul className="max-h-72 overflow-y-auto divide-y divide-slate-50">
+              <ul id="patient-search-results" className="max-h-72 overflow-y-auto divide-y divide-slate-50">
                 {resultados.map((p) => {
                   const edad = calcularEdad(p.fecha_nacimiento)
                   return (
@@ -295,10 +286,10 @@ export default function BuscadorPaciente({ seleccionado, onSelect }) {
                           <span className="block font-body text-sm font-semibold text-navy truncate">
                             {p.nombres} {p.apellidos}
                           </span>
-                          <span className="block font-mono text-[11px] text-slate-400">CI: {p.ci}</span>
+                          <span className="block font-mono text-[11px] text-slate-600">CI: {p.ci}</span>
                         </span>
                         {edad != null && (
-                          <span className="font-mono text-xs text-slate-400 flex-shrink-0">{edad} años</span>
+                          <span className="font-mono text-xs text-slate-600 flex-shrink-0">{edad} años</span>
                         )}
                       </button>
                     </li>
@@ -310,7 +301,7 @@ export default function BuscadorPaciente({ seleccionado, onSelect }) {
                 <p className="font-body text-sm text-slate-500 mb-2">No encontrado.</p>
                 <button
                   onClick={irANuevo}
-                  className="inline-flex items-center gap-1.5 text-sm font-semibold text-teal-med hover:underline cursor-pointer"
+                  className="inline-flex items-center gap-1.5 text-sm font-semibold text-sky-800 hover:underline cursor-pointer"
                 >
                   <Plus className="w-4 h-4" /> ¿Crear nuevo paciente?
                 </button>
@@ -322,7 +313,7 @@ export default function BuscadorPaciente({ seleccionado, onSelect }) {
 
       <button
         onClick={irANuevo}
-        className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-slate-400 hover:text-teal-med transition-colors cursor-pointer"
+        className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-teal-med transition-colors cursor-pointer"
       >
         <Plus className="w-3.5 h-3.5" /> Registrar nuevo paciente
       </button>

@@ -11,9 +11,11 @@ Retorna:
 - Top patologías detectadas
 """
 
-from datetime import datetime, timedelta
-from django.db.models import Count, Avg, Q, F, ExpressionWrapper, fields
-from django.db.models.functions import TruncDate, TruncHour
+from datetime import datetime, timedelta, date
+from django.utils import timezone
+from diagnostico.results import probabilities_es
+from django.db.models import Count, Q, F, ExpressionWrapper
+from django.db.models.functions import TruncHour
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -31,25 +33,38 @@ class MetricasOperacionalesView(APIView):
 
     def get(self, request):
         # Rango de fechas (default: últimos 30 días)
-        dias = int(request.query_params.get("dias", 30))
-        fecha_inicio = datetime.now().date() - timedelta(days=dias)
+        try:
+            dias = int(request.query_params.get("dias", 30))
+            if not 1 <= dias <= 366:
+                raise ValueError
+        except (TypeError, ValueError):
+            return Response({"error": "dias debe ser un entero entre 1 y 366."}, status=400)
+        try:
+            fecha_fin = date.fromisoformat(request.query_params.get("fecha_hasta", timezone.localdate().isoformat()))
+            fecha_inicio = date.fromisoformat(request.query_params.get("fecha_desde", (fecha_fin - timedelta(days=dias - 1)).isoformat()))
+            dias = (fecha_fin - fecha_inicio).days + 1
+            if not 1 <= dias <= 366:
+                raise ValueError
+        except (TypeError, ValueError):
+            return Response({"error": "Rango de fechas inválido; máximo 366 días."}, status=400)
 
         # ──────────────────────────────────────────────────────────────────────
         # 1. Estudios por día
+        # Nota: `fecha` es DateField; agrupar directamente evita TruncDate sobre
+        # DateField, que falla en SQLite con USE_TZ=True (P4).
         # ──────────────────────────────────────────────────────────────────────
         estudios_por_dia = (
             Estudio.objects
-            .filter(fecha__gte=fecha_inicio)
-            .annotate(dia=TruncDate("fecha"))
-            .values("dia")
+            .filter(fecha__range=(fecha_inicio, fecha_fin))
+            .values("fecha")
             .annotate(total=Count("id"))
-            .order_by("dia")
+            .order_by("fecha")
         )
         # Completar días sin datos
-        dias_dict = {item["dia"]: item["total"] for item in estudios_por_dia}
+        dias_dict = {item["fecha"]: item["total"] for item in estudios_por_dia}
         serie_estudios = []
         for i in range(dias):
-            d = datetime.now().date() - timedelta(days=dias - 1 - i)
+            d = fecha_inicio + timedelta(days=i)
             serie_estudios.append({
                 "fecha": d.isoformat(),
                 "total": dias_dict.get(d, 0),
@@ -63,10 +78,10 @@ class MetricasOperacionalesView(APIView):
 
         latencia_qs = (
             InformePreliminar.objects
-            .filter(estado="firmado", fecha_firmado__isnull=False, fecha_creacion__gte=fecha_inicio)
+            .filter(estado="firmado", fecha_firmado__isnull=False, fecha_creacion__date__range=(fecha_inicio, fecha_fin))
             .annotate(
                 latencia=ExpressionWrapper(
-                    F("fecha_firmado") - F("estudio__fecha"),
+                    F("fecha_firmado") - F("estudio__created_at"),
                     output_field=DurationField()
                 )
             )
@@ -93,10 +108,10 @@ class MetricasOperacionalesView(APIView):
         # ──────────────────────────────────────────────────────────────────────
         # 3. % Completados vs Pendientes
         # ──────────────────────────────────────────────────────────────────────
-        total_estudios = Estudio.objects.filter(fecha__gte=fecha_inicio).count()
+        total_estudios = Estudio.objects.filter(fecha__range=(fecha_inicio, fecha_fin)).count()
         # Un estudio está "completado" si tiene al menos un informe firmado
         completados = InformePreliminar.objects.filter(
-            estudio__fecha__gte=fecha_inicio, estado="firmado"
+            estudio__fecha__range=(fecha_inicio, fecha_fin), estado="firmado"
         ).values("estudio").distinct().count()
         pendientes = total_estudios - completados
 
@@ -117,11 +132,11 @@ class MetricasOperacionalesView(APIView):
         from collections import Counter
         patologias_counter = Counter()
         resultados = ResultadoCNN.objects.filter(
-            fecha_analisis__date__gte=fecha_inicio
+            fecha_analisis__date__range=(fecha_inicio, fecha_fin)
         ).values_list("patologias", flat=True)
         for pats in resultados:
             if isinstance(pats, dict):
-                for nombre, prob in pats.items():
+                for nombre, prob in probabilities_es(pats).items():
                     if prob >= 0.15:  # umbral de mención
                         patologias_counter[nombre] += 1
 
@@ -132,25 +147,32 @@ class MetricasOperacionalesView(APIView):
 
         # ──────────────────────────────────────────────────────────────────────
         # 6. Estudios por hora (heatmap horario)
+        # Nota: `fecha` es DateField y no tiene hora; usar `created_at`
+        # (DateTimeField) para la distribución horaria (P4).
         # ──────────────────────────────────────────────────────────────────────
         estudios_por_hora = (
             Estudio.objects
-            .filter(fecha__gte=fecha_inicio)
-            .annotate(hora=TruncHour("fecha"))
+            .filter(created_at__date__range=(fecha_inicio, fecha_fin))
+            .annotate(hora=TruncHour("created_at"))
             .values("hora")
             .annotate(total=Count("id"))
             .order_by("hora")
         )
-        hora_dict = {item["hora"].hour: item["total"] for item in estudios_por_hora if item["hora"]}
+        from collections import defaultdict
+        hora_dict = defaultdict(int)
+        for item in estudios_por_hora:
+            if item["hora"]:
+                hora_dict[item["hora"].hour] += item["total"]
         heatmap_hora = [{"hora": h, "total": hora_dict.get(h, 0)} for h in range(24)]
 
         # ──────────────────────────────────────────────────────────────────────
         # RESPUESTA
         # ──────────────────────────────────────────────────────────────────────
         return Response({
+            "metricas_cnn": {"estado": "pendiente", "detail": "Resultado pendiente de ejecución experimental."},
             "periodo_dias": dias,
             "fecha_inicio": fecha_inicio.isoformat(),
-            "fecha_fin": datetime.now().date().isoformat(),
+            "fecha_fin": fecha_fin.isoformat(),
             "estudios_por_dia": serie_estudios,
             "latencia_diagnostico": latencia_metrics,
             "completitud": {

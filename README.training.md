@@ -1,227 +1,108 @@
-# Neo RX Fine-tuning Pipeline — README
+# Entrenamiento de Neo RX V1.3.1 en Kaggle
 
-Complete pipeline to fine-tune a ResNet-50 model on **NIH ChestX-ray14** (112,120 frontal chest X-rays, 14 pathologies) and deploy it in the Neo RX Django backend.
+Este pipeline ajusta el ResNet-50 preentrenado de `torchxrayvision` con NIH ChestX-ray14. El flujo está preparado para usar el nivel gratuito de Kaggle, leer las imágenes directamente desde `/kaggle/input` y guardar todo resultado en `/kaggle/working`.
 
-## Overview
+> El modelo es apoyo a la interpretación radiológica. Las métricas reales quedan pendientes hasta ejecutar el entrenamiento completo y evaluar el conjunto de prueba.
 
-| Component | Technology |
-|-----------|------------|
-| Base model | `torchxrayvision` ResNet-50 (`resnet50-res512-all`) |
-| Dataset | NIH ChestX-ray14 (14 labels, multi-label) |
-| Training | 2-stage: head-only (3 epochs) → partial unfreeze layer3+4 (7 epochs) |
-| Loss | `BCEWithLogitsLoss` on raw logits |
-| Hardware | GPU cloud (RunPod A100/H100 recommended) |
-| Output | `checkpoints/finetuned_resnet50_nih.pt` (loadable by Django) |
+## Qué incluye
 
-## Quick Start
+- Auditoría de imágenes corruptas, ausentes, casi constantes, ambiguas y duplicadas por SHA-256.
+- Manifiesto limpio con ruta real, dimensiones, estadísticas de píxel, paciente y proyección AP/PA.
+- División determinista 70/15/15 por paciente, sin fuga entre train, validación y prueba.
+- Fine-tuning en dos fases: cabeza nueva durante 3 épocas y `layer3`/`layer4` durante 7 épocas.
+- `BCEWithLogitsLoss` con `pos_weight` calculado exclusivamente en train.
+- AMP, recorte de gradiente, early stopping y umbrales optimizados exclusivamente en validación.
+- `last.pt` reanudable y `best.pt` guardados atómicamente después de cada época.
+- Evaluación final global y por proyección AP/PA.
 
-### 1. Environment Setup (RunPod / Local GPU)
+## Inicio rápido en Kaggle
 
-**Option A: Docker (recommended for RunPod)**
-```bash
-# Build image
-docker build -f Dockerfile.training -t neorx-training .
+1. Crea un Notebook privado en Kaggle.
+2. En **Add Input**, adjunta un dataset que contenga `Data_Entry_2017.csv` y todas las imágenes de NIH ChestX-ray14.
+3. En **Notebook options**, activa Internet y selecciona un acelerador GPU disponible.
+4. Importa [`notebooks/neorx_training_kaggle.ipynb`](notebooks/neorx_training_kaggle.ipynb).
+5. Ejecuta las celdas en orden con `MODE = "pilot"`.
+6. Si el piloto termina y genera `last.pt`, inicia una sesión limpia, cambia a `MODE = "full"` y ejecuta todo otra vez.
+7. Guarda una versión del Notebook con sus outputs y descarga `neorx-v1.3.1-checkpoints.zip`, `manifests/`, `results/` y `runs/`.
 
-# Run interactive with GPU
-docker run --gpus all -it \
-  -v /host/data:/workspace/data \
-  -v /host/checkpoints:/workspace/checkpoints \
-  -v /host/runs:/workspace/runs \
-  neorx-training bash
-```
+Kaggle puede cambiar el tipo de GPU gratuito disponible y sus límites de sesión. El cuaderno detecta la GPU en lugar de depender de un modelo específico.
 
-**Option B: Local / VM (Python 3.10+)**
-```bash
-cd backend/training
-pip install -r requirements.txt
-```
+## Comandos equivalentes
 
-### 2. Download & Prepare Dataset
-
-NIH ChestX-ray14 is ~42 GB (images) + CSV. Two options:
-
-**A. Via Kaggle (requires `kaggle.json` with accepted terms)**
-```bash
-# Inside container or local env
-python -m training.prepare_dataset \
-  --data-dir data/nih \
-  --source kaggle
-```
-This downloads via `kagglehub`, consolidates all `images_*.zip` into `data/nih/images/`, copies `Data_Entry_2017.csv`, and creates patient-level splits (70/15/15) in `data/nih/splits.json`.
-
-**B. Manual Download (NIH website / academic access)**
-1. Download from NIH: https://nihcc.app.box.com/v/ChestXray-NIHCC
-2. Extract all `images_*.tar.gz` into `data/nih/images/`
-3. Place `Data_Entry_2017.csv` in `data/nih/`
-4. Run:
-```bash
-python -m training.prepare_dataset \
-  --data-dir data/nih \
-  --source local
-```
-
-**Output:**
-```
-data/nih/
-├── images/                 # 112,120 PNG files
-├── Data_Entry_2017.csv     # Metadata
-├── splits.json             # Train/val/test indices (patient-level)
-└── labels.json             # NIH_LABELS list
-```
-
-### 3. Train Model
+Desde `backend/`, con el dataset ya adjunto:
 
 ```bash
-python -m training.train --config training/config.yaml
+python -m pip install -r training/requirements.kaggle.txt
+python -m training.validate_dataset \
+  --input-root /kaggle/input/nih-chest-xrays \
+  --output-dir /kaggle/working/manifests \
+  --workers 4
+python -m training.create_splits \
+  --manifest /kaggle/working/manifests/clean_manifest.csv \
+  --output-dir /kaggle/working/manifests \
+  --labels pulmonary \
+  --seed 42
+python -m training.train \
+  --config /kaggle/working/config.kaggle.runtime.yaml \
+  --device cuda \
+  --max-samples 2000
 ```
 
-**Expected timeline on A100 (40GB):**
-| Phase | Epochs | Time (est.) |
-|-------|--------|-------------|
-| Head-only | 3 | ~1.5–2 hours |
-| Partial unfreeze | 7 | ~3–4 hours |
-| **Total** | **10** | **~5–6 hours** |
+`--max-samples 2000` es solamente un smoke test. No uses sus métricas como resultado del proyecto. Para el entrenamiento final ejecuta sin ese argumento.
 
-**Key config knobs (`training/config.yaml`):**
-```yaml
-train:
-  epochs_head: 3           # Head-only epochs
-  epochs_finetune: 7       # Unfreeze epochs
-  lr_head: 1.0e-3          # Head learning rate
-  lr_finetune: 1.0e-4      # Finetune learning rate
-  batch_size: 32           # Adjust for GPU memory
-  mixed_precision: true    # Enable AMP
-```
+## Reanudar una sesión interrumpida
 
-**Outputs:**
-- `checkpoints/best_epoch*_auc*.pt` — best per-epoch checkpoints
-- `checkpoints/finetuned_resnet50_nih.pt` — **final production checkpoint**
-- `runs/<timestamp>/` — TensorBoard logs
+Publica o adjunta como Dataset privado los outputs de la sesión anterior y apunta a `last.pt`:
 
-**Monitor with TensorBoard:**
 ```bash
-tensorboard --logdir runs --port 6006
+python -m training.train \
+  --config /kaggle/working/config.kaggle.runtime.yaml \
+  --device cuda \
+  --resume /kaggle/input/neorx-checkpoints/last.pt
 ```
 
-### 4. Evaluate on Test Set
+El checkpoint conserva modelo, optimizador, scheduler, AMP, generadores aleatorios, fase, próxima época, paciencia y mejor AUC. Conserva también `best.pt`; el entrenador lo copia junto al nuevo output cuando reanuda desde otra entrada.
+
+No mezcles checkpoints del piloto con el entrenamiento completo. Empieza el completo en una salida limpia.
+
+## Evaluación final
 
 ```bash
 python -m training.evaluate \
-  --config training/config.yaml \
-  --checkpoint checkpoints/finetuned_resnet50_nih.pt \
+  --config /kaggle/working/config.kaggle.runtime.yaml \
+  --checkpoint /kaggle/working/checkpoints/finetuned_resnet50_nih.pt \
+  --device cuda \
+  --output-dir /kaggle/working/results \
   --plot
 ```
 
-**Outputs:**
-- `checkpoints/metrics.json` — Per-class AUC, sensitivity, specificity, F1, optimal thresholds
-- `checkpoints/metrics_auc_curves.png` — ROC curves (if `--plot`)
+Resultados principales:
 
-### 5. Compare with Baseline
+- `metrics.csv`: AUC, AP, sensibilidad, especificidad, precisión y F1 por clase.
+- `metrics_by_view.csv`: las mismas métricas separadas por AP/PA.
+- `thresholds.csv`: umbrales aprendidos con validación.
+- `classification_report.json` y `confusion_matrix.csv`.
+- Curvas ROC/PR y matrices de confusión.
 
-```bash
-python -m training.compare \
-  --config training/config.yaml \
-  --finetuned-checkpoint checkpoints/finetuned_resnet50_nih.pt
+## Integración con Django
+
+Copia `finetuned_resnet50_nih.pt` fuera del repositorio y configura:
+
+```env
+NEORX_MODEL_PATH=/ruta/segura/finetuned_resnet50_nih.pt
 ```
 
-**Output:**
-- `checkpoints/comparison.json` — Side-by-side AUC per class + macro average
-- Prints comparison table showing delta per pathology
+Reinicia Django y el worker de Celery. El repositorio ignora `.pt`, datasets y outputs para evitar subir archivos grandes o datos clínicos a Git.
 
-### 6. Deploy to Django Backend
+## Reglas de validez
 
-1. **Copy checkpoint** to backend model directory:
-```bash
-mkdir -p backend/diagnostico/models
-cp checkpoints/finetuned_resnet50.pt backend/diagnostico/models/
-```
+- No ajustes umbrales con test.
+- No reportes métricas del piloto.
+- Conserva `dataset_audit.json`, `split_summary.json`, configuración, historial y checkpoint para reproducibilidad.
+- Si una clase no tiene positivos en alguno de los tres conjuntos, `create_splits.py` falla y obliga a revisar el dataset.
+- Verifica que `patient_overlap` sea `0` antes de entrenar.
+- Registra la GPU y la versión de PyTorch impresas por el Notebook.
 
-2. **Set environment variable** in Django settings / `.env` / docker-compose:
-```bash
-# .env or docker-compose.yml environment:
-NEORX_MODEL_PATH=/app/diagnostico/models/finetuned_resnet50_nih.pt
-```
-Or absolute path on host:
-```bash
-NEORX_MODEL_PATH=/absolute/path/to/backend/diagnostico/models/finetuned_resnet50_nih.pt
-```
+## Formato del checkpoint
 
-3. **Restart Celery worker** (and Django if needed):
-```bash
-docker compose restart celery_worker
-# or
-systemctl restart neorx-celery
-```
-
-4. **Verify integration:**
-   - Upload a DICOM via frontend → Escaneo page
-   - Check logs: `INFO [CNN TASK ...] Modelo fine-tuned cargado desde ...`
-   - Results should show 12 pulmonary pathologies (Cardiomegaly & Hernia excluded)
-
-## Checkpoint Format
-
-The saved `.pt` contains:
-```python
-{
-    "state_dict": ...,           # Full model state (backbone + head + op_norm)
-    "pathologies": [...],        # 14 NIH labels in order
-    "labels_es": {...},          # EN -> ES mapping
-    "num_classes": 14,
-    "model_arch": "resnet50",
-    "base_weights": "resnet50-res512-all",
-    "pulmonary_labels": [...],   # 12 pulmonary-only labels
-    "metrics": {...},            # Best validation metrics
-    "saved_at": "2026-...Z",
-    "extra": {...}               # Config, epoch, phase
-}
-```
-
-## Integration Details (DetectorTorax)
-
-When `NEORX_MODEL_PATH` is set and valid, `DetectorTorax.cargar()`:
-1. Loads checkpoint with `weights_only=False`
-2. Instantiates base `xrv.models.ResNet(weights="resnet50-res512-all")`
-3. Replaces `model.model.fc = nn.Linear(2048, 14)`
-4. Loads `state_dict` (strict=True)
-5. Sets `model.pathologies = checkpoint["pathologies"]`
-6. In `predecir()`: maps EN→ES using `checkpoint["labels_es"]`, filters to pulmonary-only (excludes Cardiomegaly, Hernia)
-
-**Result:** Frontend receives 12 pathologies with ES names, ordered by probability descending — **zero frontend changes required**.
-
-## Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| OOM on A100 40GB | Reduce `batch_size` to 16 or 8 in config |
-| Kaggle download fails | Ensure `kaggle.json` in `~/.kaggle/` with accepted NIH terms |
-| `weights_only` error | Checkpoint uses `weights_only=False` (contains lists/dicts) — this is intentional |
-| AUC NaN for some classes | Class has no positive/negative samples in test split — normal for rare pathologies |
-| Frontend shows 0 pathologies | Check `NEORX_MODEL_PATH` env var, restart Celery, verify checkpoint loads in logs |
-
-## Expected Metrics (Reference)
-
-Based on literature (Quispe & Mamani 2023, Torrez & Condori 2024) and torchxrayvision baseline:
-
-| Pathology | Baseline AUC | Target Finetuned AUC |
-|-----------|--------------|---------------------|
-| Atelectasis | ~0.82 | >0.85 |
-| Cardiomegaly | ~0.91 | >0.92 |
-| Consolidation | ~0.79 | >0.83 |
-| Edema | ~0.88 | >0.90 |
-| Effusion | ~0.86 | >0.89 |
-| Pneumonia | ~0.76 | >0.80 |
-| Pneumothorax | ~0.84 | >0.87 |
-| **Macro Avg** | **~0.82** | **>0.85** |
-
-## License & Citation
-
-- NIH ChestX-ray14: Wang et al., "ChestX-ray8: Hospital-scale Chest X-ray Database", 2017
-- torchxrayvision: Cohen et al., "TorchXRayVision", 2022
-- This code: Academic use only (Proyecto de Grado Neo RX)
-
-## Support
-
-For issues with the training pipeline, check:
-1. TensorBoard logs for loss/AUC curves
-2. `metrics.json` for per-class diagnostics
-3. Django logs for integration errors (`NEORX_MODEL_PATH` loading)
+El `.pt` final contiene los pesos, orden de las 12 patologías pulmonares, traducciones, umbrales de validación, `pos_weight`, configuración y métricas. `last.pt` añade el estado completo necesario para reanudar.

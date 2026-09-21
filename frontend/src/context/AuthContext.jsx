@@ -1,31 +1,28 @@
-import { createContext, useContext, useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { login as apiLogin, logout as apiLogout, getTokenPayload } from '../api/auth'
-
-const AuthContext = createContext(null)
-
+import { ensureSession } from '../api/axios'
+import { hasSession, clearSession } from '../api/session'
+import { AuthContext } from './useAuth'
 export function AuthProvider({ children }) {
-  const payload = getTokenPayload()
-  const [user, setUser] = useState(payload?.username || null)
-  const [rol, setRol] = useState(payload?.rol || null)
-
-  const login = useCallback(async (username, password) => {
-    await apiLogin(username, password)
-    const p = getTokenPayload()
-    setUser(p?.username || username)
-    setRol(p?.rol || null)
+  const [identity, setIdentity] = useState(null)
+  const [ready, setReady] = useState(false)
+  useEffect(() => {
+    let active = true
+    const sync = () => { if (active) setIdentity(hasSession() ? getTokenPayload() : null) }
+    const renew = async () => {
+      if (!hasSession()) { clearSession(); return }
+      try { await ensureSession() } catch { /* Network failures don't destroy a valid refresh token. */ }
+      sync()
+    }
+    window.addEventListener('auth-changed', sync)
+    window.addEventListener('storage', sync)
+    const visible = () => { if (document.visibilityState === 'visible') renew() }
+    document.addEventListener('visibilitychange', visible)
+    renew().finally(() => { if (active) setReady(true) })
+    const timer = setInterval(renew, 30000)
+    return () => { active = false; clearInterval(timer); window.removeEventListener('auth-changed', sync); window.removeEventListener('storage', sync); document.removeEventListener('visibilitychange', visible) }
   }, [])
-
-  const logout = useCallback(() => {
-    apiLogout()
-    setUser(null)
-    setRol(null)
-  }, [])
-
-  return (
-    <AuthContext.Provider value={{ user, rol, login, logout, isAuth: !!user }}>
-      {children}
-    </AuthContext.Provider>
-  )
+  const login = useCallback(async (username, password, remember = false) => { await apiLogin(username, password, remember) }, [])
+  const logout = useCallback(() => { apiLogout().catch(() => {}) }, [])
+  return <AuthContext.Provider value={{ user: identity?.username || null, rol: identity?.rol || null, isAuth: !!identity, ready, login, logout }}>{children}</AuthContext.Provider>
 }
-
-export const useAuth = () => useContext(AuthContext)

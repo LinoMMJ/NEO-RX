@@ -33,13 +33,6 @@ const NIVEL_LABELS = {
   marginal: 'No significativo',
 }
 
-const NIVEL_COLORS = {
-  alto: 'danger',
-  moderado: 'orange',
-  leve: 'warning',
-  marginal: 'slate',
-}
-
 function getBadge(nivel) {
   switch (nivel) {
     case 'alto':      return { label: 'ALTO',       cls: 'bg-danger/15 text-danger border-danger/30' }
@@ -70,16 +63,12 @@ export default function ListaPatologias({ patologias }) {
   }, [])
 
   // Función para clasificar usando backend config o fallback local
-  const clasificar = useCallback((prob) => {
-    if (!nivelesConfig) {
-      // Fallback local (debe coincidir con backend/niveles.py)
-      if (prob >= 0.65) return 'alto'
-      if (prob >= 0.40) return 'moderado'
-      if (prob >= 0.20) return 'leve'
-      return 'marginal'
-    }
-    // Usar umbrales generales del config
-    const { alto, moderado, leve } = nivelesConfig.niveles_generales
+  const clasificar = useCallback((nombre, prob) => {
+    // El backend distingue umbrales de visualización generales y por patología.
+    const niveles = nivelesConfig?.umbrales_visuales_por_patologia?.[nombre]
+      ?? nivelesConfig?.niveles_visuales_generales
+      ?? { alto: 0.65, moderado: 0.40, leve: 0.20 }
+    const { alto, moderado, leve } = niveles
     if (prob >= alto) return 'alto'
     if (prob >= moderado) return 'moderado'
     if (prob >= leve) return 'leve'
@@ -87,7 +76,7 @@ export default function ListaPatologias({ patologias }) {
   }, [nivelesConfig])
 
   // Solo mostrar > 5%
-  const lista = patologias ? Object.entries(patologias).filter(([, p]) => p >= 0.05) : []
+  const lista = patologias ? Object.entries(patologias).filter(([, p]) => p >= 0.05).sort((a, b) => b[1] - a[1]) : []
 
   // Estado vacío: sin datos o sin hallazgos significativos
   if (lista.length === 0) {
@@ -114,7 +103,7 @@ export default function ListaPatologias({ patologias }) {
       <div className="space-y-3">
         {lista.map(([nombre, prob], i) => {
           const pct = Math.round(prob * 100)
-          const nivel = clasificar(prob)
+          const nivel = clasificar(nombre, prob)
           const badge = getBadge(nivel)
           const bar = getBarColor(nivel)
           const info = DESCRIPCIONES[nombre]

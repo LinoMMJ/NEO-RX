@@ -1,45 +1,15 @@
 # Dockerfile.prod - Frontend Production
-# Multi-stage build: build React app, serve with Nginx
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Stage 1: Builder (compila React app)
-# ─────────────────────────────────────────────────────────────────────────────
 FROM node:20-alpine AS builder
-
 WORKDIR /app
-
-# Copiar package files
 COPY package*.json ./
-
-# Instalar dependencias
-RUN npm ci --only=production
-
-# Copiar código fuente
+# Vite is a build-time devDependency and must be present in the builder stage.
+RUN npm ci
 COPY . .
-
-# Build de producción
 RUN npm run build
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Stage 2: Nginx (sirve archivos estáticos)
-# ─────────────────────────────────────────────────────────────────────────────
 FROM nginx:alpine AS runtime
-
-# Copiar build de React
 COPY --from=builder /app/dist /usr/share/nginx/html
-
-# Configuración Nginx para SPA
 COPY nginx.conf /etc/nginx/conf.d/default.conf
-
-# Usuario no-root
-RUN addgroup -g 1001 -S nginx && \
-    adduser -S -D -H -u 1001 -h /var/cache/nginx -s /sbin/nologin -G nginx -g nginx nginx
-
-# Exponer puerto
 EXPOSE 80
-
-# Healthcheck
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD wget -q --spider http://localhost/ || exit 1
-
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD wget -q --spider http://localhost/ || exit 1
 CMD ["nginx", "-g", "daemon off;"]

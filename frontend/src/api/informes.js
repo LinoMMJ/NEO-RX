@@ -8,4 +8,4 @@ export const getInforme = (id) => api.get(`/informes/${id}/`)
 export const updateInforme = (id, data) => api.patch(`/informes/${id}/`, data)
 
 export const descargarInformePDF = (id) =>
-  api.get(`/informes/${id}/descargar/`, { responseType: 'blob', timeout: 30000 })
+  api.get(`/informes/${id}/pdf/`, { responseType: 'blob', timeout: 30000 })

@@ -3,10 +3,11 @@ Views para Informes Clínicos — Generación, Firma, Export PDF y DICOM SR.
 
 Endpoints:
 - POST   /api/informes/generar/          → Genera borrador automático desde CNN
+- GET    /api/informes/                  → Lista paginada de informes (con filtros)
 - GET    /api/informes/<pk>/             → Detalle / edición de borrador
 - PUT    /api/informes/<pk>/             → Actualiza hallazgos/impresión/recomendaciones
 - POST   /api/informes/<pk>/firmar/      → Firma (solo rol=medico)
-- GET    /api/informes/<pk>/pdf/         → Export PDF (weasyprint)
+- GET    /api/informes/<pk>/pdf/         → Export PDF (ReportLab + xhtml2pdf fallback)
 - GET    /api/informes/<pk>/dicom-sr/    → Export DICOM SR (Basic Text SR)
 """
 
@@ -18,16 +19,21 @@ from django.utils.decorators import method_decorator
 from django.http import FileResponse
 from django.template.loader import render_to_string
 from rest_framework.views import APIView
-from rest_framework.generics import RetrieveUpdateAPIView
+from rest_framework.generics import RetrieveUpdateAPIView, ListAPIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
+from rest_framework.pagination import PageNumberPagination
+from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework.filters import SearchFilter, OrderingFilter
 
 from pacientes.models import Estudio
 from estudios.models import ImagenDICOM
 from diagnostico.models import ResultadoCNN
 from .models import InformePreliminar
 from .serializers import InformePreliminarSerializer
+from neorx.models import log_audit
+from neorx.permissions import MedicalWritePermission
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -43,129 +49,32 @@ def _pct(v):
 
 
 def generar_texto_hallazgos(resultado_cnn, tipo_proyeccion):
-    """Genera texto clínico estructurado por regiones anatómicas.
-    Umbral de mención: >15%. Umbral de hallazgo positivo: >45%."""
-    patologias = resultado_cnn.patologias or {}
-    tipo = tipo_proyeccion or "PA"
-    texto = []
-
-    # REGIÓN 1: PARÉNQUIMA PULMONAR
-    pulmonares = {
-        "Neumonia": patologias.get("Neumonia", 0),
-        "Consolidacion": patologias.get("Consolidacion", 0),
-        "Infiltrado": patologias.get("Infiltrado", 0),
-        "Nodulo": patologias.get("Nodulo", 0),
-        "Masa": patologias.get("Masa", 0),
-        "Atelectasia": patologias.get("Atelectasia", 0),
-        "Edema pulmonar": patologias.get("Edema pulmonar", 0),
-        "Opacidad pulmonar": patologias.get("Opacidad pulmonar", 0),
-    }
-    hallazgos_pulmonares = {k: v for k, v in pulmonares.items() if v > 0.15}
-    if hallazgos_pulmonares:
-        positivos = [k for k, v in hallazgos_pulmonares.items() if v > 0.45]
-        marginales = [k for k, v in hallazgos_pulmonares.items() if 0.15 < v <= 0.45]
-        linea = "PARÉNQUIMA PULMONAR: "
-        if positivos:
-            linea += f"Se identifican opacidades compatibles con {', '.join(positivos).lower()}. "
-        if marginales:
-            probs = " / ".join(_pct(hallazgos_pulmonares[m]) for m in marginales)
-            linea += (
-                f"No se descartan hallazgos incipientes de {', '.join(marginales).lower()} "
-                f"(probabilidad {probs}). "
-            )
-        texto.append(linea.strip())
-    else:
-        texto.append(
-            "PARÉNQUIMA PULMONAR: Sin opacidades ni infiltrados significativos identificados."
-        )
-
-    # REGIÓN 2: ESPACIOS PLEURALES
-    pleural = patologias.get("Derrame pleural", 0)
-    engrosamiento = patologias.get("Engrosamiento pleural", 0)
-    neum = patologias.get("Neumotorax", 0)
-    pleura_hallazgos = []
-    if pleural > 0.45:
-        pleura_hallazgos.append(f"derrame pleural ({_pct(pleural)})")
-    elif pleural > 0.15:
-        pleura_hallazgos.append(f"probable derrame pleural ({_pct(pleural)})")
-    if neum > 0.45:
-        pleura_hallazgos.append(f"neumotórax ({_pct(neum)})")
-    elif neum > 0.15:
-        pleura_hallazgos.append(f"posible neumotórax ({_pct(neum)})")
-    if engrosamiento > 0.30:
-        pleura_hallazgos.append(f"engrosamiento pleural ({_pct(engrosamiento)})")
-    if pleura_hallazgos:
-        texto.append(f"ESPACIOS PLEURALES: Se observa {', '.join(pleura_hallazgos)}.")
-    else:
-        texto.append(
-            "ESPACIOS PLEURALES: Ángulos costofrénicos libres. "
-            "Sin evidencia de derrame ni neumotórax."
-        )
-
-    # REGIÓN 3: MEDIASTINO Y SILUETA CARDÍACA
-    texto.append(
-        "MEDIASTINO Y SILUETA CARDÍACA: Silueta cardíaca de tamaño conservado. "
-        "Mediastino centrado de amplitud normal. Sin ensanchamiento mediastínico evidente."
-    )
-
-    # REGIÓN 4: ESTRUCTURAS ÓSEAS
-    texto.append(
-        "ESTRUCTURAS ÓSEAS: Arcos costales, clavículas y columna dorsal visibles "
-        f"sin alteraciones morfológicas evidentes en la proyección {tipo}."
-    )
-
-    # REGIÓN 5: PARTES BLANDAS
-    texto.append(
-        "PARTES BLANDAS: Sin alteraciones significativas en tejidos blandos pericostales."
-    )
-
-    return "\n\n".join(texto)
+    from diagnostico.results import probabilities_es
+    probabilities = probabilities_es(resultado_cnn.patologias)
+    lines = ["Resultado preliminar de IA; requiere revisión profesional."]
+    lines.extend(f"{label}: probabilidad estimada {_pct(value)}."
+                 for label, value in sorted(probabilities.items(), key=lambda item: item[1], reverse=True))
+    if not probabilities:
+        lines.append("Sin probabilidades disponibles; no permite descartar hallazgos.")
+    return "\n".join(lines)
 
 
 def generar_impresion(resultado_cnn):
-    """Resumen ejecutivo de los hallazgos."""
-    patologias = resultado_cnn.patologias or {}
-    top = sorted(patologias.items(), key=lambda x: x[1], reverse=True)
-    criticos = [(k, v) for k, v in top if v > 0.65]
-    moderados = [(k, v) for k, v in top if 0.40 < v <= 0.65]
-    if not criticos and not moderados:
-        return (
-            "Radiografía de tórax sin hallazgos patológicos significativos "
-            "según el análisis asistido por red neuronal convolucional ResNet-50. "
-            "Se sugiere correlación clínica."
-        )
-    lineas = []
-    if criticos:
-        hallazgos_str = ", ".join(f"{k} ({_pct(v)})" for k, v in criticos)
-        lineas.append(f"Hallazgos de alta probabilidad compatibles con: {hallazgos_str}.")
-    if moderados:
-        hallazgos_str = ", ".join(f"{k} ({_pct(v)})" for k, v in moderados)
-        lineas.append(f"Hallazgos de probabilidad moderada a considerar: {hallazgos_str}.")
-    lineas.append(
-        "Impresión generada por sistema de apoyo diagnóstico (CNN ResNet-50). "
-        "Requiere validación y firma del médico radiólogo especialista."
-    )
-    return " ".join(lineas)
+    return "Resultado preliminar de apoyo a la interpretación. Requiere revisión, validación y firma del médico radiólogo."
 
 
 def generar_recomendaciones(resultado_cnn):
-    patologias = resultado_cnn.patologias or {}
-    if not patologias:
-        return "Control según criterio clínico. Sin hallazgos que requieran seguimiento urgente."
-    top_proba = max(patologias.values())
-    top_nombre = max(patologias, key=patologias.get)
-    if top_proba > 0.65:
-        return (
-            f"Correlación clínica urgente recomendada. "
-            f"Hallazgo principal ({top_nombre}) con alta probabilidad ({_pct(top_proba)}). "
-            f"Considerar seguimiento con tomografía computada de tórax según criterio clínico."
-        )
-    elif top_proba > 0.40:
-        return (
-            "Correlación clínica recomendada. "
-            "Seguimiento radiológico en 4-6 semanas si persiste sintomatología."
-        )
-    return "Control según criterio clínico. Sin hallazgos que requieran seguimiento urgente."
+    return "Conducta y seguimiento según revisión profesional y contexto clínico."
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# PAGINACIÓN ESTÁNDAR
+# ──────────────────────────────────────────────────────────────────────────────
+
+class StandardResultsPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = 'page_size'
+    max_page_size = 100
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -174,7 +83,7 @@ def generar_recomendaciones(resultado_cnn):
 
 @method_decorator(ratelimit(key="ip", rate="20/m", block=True), name="post")
 class GenerarInformeView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [MedicalWritePermission]
 
     def post(self, request):
         estudio_id = request.data.get("estudio_id")
@@ -205,7 +114,10 @@ class GenerarInformeView(APIView):
         tipo_proyeccion = imagen.tipo_proyeccion or "PA"
         calidad = "adecuada" if imagen.es_nitida else "limitada por borrosidad"
 
-        informe, _ = InformePreliminar.objects.get_or_create(estudio=estudio)
+        informe, created = InformePreliminar.objects.get_or_create(estudio=estudio)
+        if not created:
+            return Response(InformePreliminarSerializer(informe, context={"request": request}).data)
+
         informe.tecnica = (
             f"Radiografía de Tórax {tipo_proyeccion}. Técnica digital con detector "
             f"de panel plano. Calidad técnica {calidad}."
@@ -217,6 +129,20 @@ class GenerarInformeView(APIView):
             informe.medico = request.user
         informe.save()
 
+        # Auditoría: generación/actualización de informe
+        log_audit(
+            request,
+            action="create" if created else "update",
+            resource_type="informe",
+            resource_id=str(informe.pk),
+            after={
+                "estudio_id": estudio.pk,
+                "estado": informe.estado,
+                "medico_id": informe.medico_id if informe.medico else None,
+            },
+            metadata={"generated_by": request.user.username if request.user.is_authenticated else "system"},
+        )
+
         serializer = InformePreliminarSerializer(informe, context={"request": request})
         return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -224,9 +150,9 @@ class GenerarInformeView(APIView):
 @method_decorator(ratelimit(key="ip", rate="60/m", block=True), name="get")
 @method_decorator(ratelimit(key="ip", rate="20/m", block=True), name="put")
 class InformePreliminarDetailView(RetrieveUpdateAPIView):
-    queryset = InformePreliminar.objects.all()
+    queryset = InformePreliminar.objects.select_related('estudio__paciente', 'medico').all()
     serializer_class = InformePreliminarSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [MedicalWritePermission]
 
     def get_serializer_context(self):
         ctx = super().get_serializer_context()
@@ -243,37 +169,71 @@ class InformePreliminarDetailView(RetrieveUpdateAPIView):
             if getattr(self.request.user, "rol", None) == "medico":
                 extra["medico"] = self.request.user
         serializer.save(**extra)
+        if nuevo_estado == "firmado":
+            estudio = serializer.instance.estudio
+            estudio.estado = "completado"
+            estudio.save(update_fields=["estado"])
+
+        # Auditoría: cambio de estado / firma de informe
+        informe = serializer.instance
+        log_audit(
+            self.request,
+            action="update",
+            resource_type="informe",
+            resource_id=str(informe.pk),
+            after={"estado": nuevo_estado, "medico_id": informe.medico_id if informe.medico else None},
+        )
+
+
+class InformeListView(ListAPIView):
+    """GET /api/informes/ — Lista paginada de informes con filtros."""
+    serializer_class = InformePreliminarSerializer
+    permission_classes = [MedicalWritePermission]
+    pagination_class = StandardResultsPagination
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['estado', 'medico', 'estudio']
+    search_fields = ['estudio__paciente__nombres', 'estudio__paciente__apellidos', 'estudio__paciente__ci', 'hallazgos', 'impresion']
+    ordering_fields = ['fecha_creacion', 'fecha_firmado', 'estado']
+    ordering = ['-fecha_creacion']
+
+    def get_queryset(self):
+        qs = InformePreliminar.objects.select_related('estudio__paciente', 'medico').all()
+
+        # Filtros adicionales via query params
+        paciente_id = self.request.query_params.get('paciente')
+        if paciente_id:
+            qs = qs.filter(estudio__paciente_id=paciente_id)
+
+        fecha_desde = self.request.query_params.get('fecha_desde')
+        if fecha_desde:
+            qs = qs.filter(fecha_creacion__date__gte=fecha_desde)
+
+        fecha_hasta = self.request.query_params.get('fecha_hasta')
+        if fecha_hasta:
+            qs = qs.filter(fecha_creacion__date__lte=fecha_hasta)
+
+        medico_id = self.request.query_params.get('medico')
+        if medico_id:
+            qs = qs.filter(medico_id=medico_id)
+
+        return qs
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# ENDPOINTS: EXPORT PDF (weasyprint)
+# ENDPOINTS: EXPORT PDF (ReportLab - RF-24)
 # ──────────────────────────────────────────────────────────────────────────────
 
 @method_decorator(ratelimit(key="ip", rate="10/m", block=True), name="get")
 class DescargarInformePDFView(APIView):
     """
-    GET /api/informes/<pk>/pdf/ — genera y descarga el informe como PDF (weasyprint).
+    GET /api/informes/<pk>/pdf/ — genera y descarga el informe como PDF (ReportLab).
 
     Solo disponible para informes en estado 'firmado'.
+    RF-24: ReportLab como motor principal.
     """
     permission_classes = [IsAuthenticated]
 
     def get(self, request, pk):
-        # Try weasyprint first (better CSS support), fallback to xhtml2pdf
-        pdf_engine = None
-        try:
-            from weasyprint import HTML
-            pdf_engine = "weasyprint"
-        except ImportError:
-            try:
-                from xhtml2pdf import pisa
-                pdf_engine = "xhtml2pdf"
-            except ImportError:
-                return Response(
-                    {"error": "Ni weasyprint ni xhtml2pdf instalados. Ejecuta: pip install weasyprint"},
-                    status=status.HTTP_501_NOT_IMPLEMENTED,
-                )
-
         try:
             informe = InformePreliminar.objects.select_related(
                 "estudio__paciente", "medico"
@@ -281,7 +241,7 @@ class DescargarInformePDFView(APIView):
         except InformePreliminar.DoesNotExist:
             return Response({"error": "Informe no encontrado."}, status=status.HTTP_404_NOT_FOUND)
 
-        if informe.estado != "firmado":
+        if informe.estado != "firmado" or not informe.medico_id or not informe.fecha_firmado:
             return Response(
                 {"error": "Solo se pueden descargar informes firmados."},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -308,33 +268,47 @@ class DescargarInformePDFView(APIView):
             "fecha_firmado": fecha_firmado,
         }
 
+        # Motor principal: ReportLab (RF-24). Fallback: xhtml2pdf (no requiere libs nativas).
         try:
-            html_string = render_to_string("informes/informe_pdf.html", contexto)
-
-            if pdf_engine == "weasyprint":
-                from weasyprint import HTML
-                pdf_bytes = BytesIO()
-                HTML(string=html_string, base_url=request.build_absolute_uri('/')).write_pdf(pdf_bytes)
-            else:
+            from .pdf_generator import generar_pdf_informe
+            pdf_bytes = generar_pdf_informe(informe, contexto=contexto)
+        except Exception as exc:
+            # Fallback controlado a xhtml2pdf usando el template HTML existente.
+            try:
                 from xhtml2pdf import pisa
+                html_string = render_to_string("informes/informe_pdf.html", contexto)
                 pdf_bytes = BytesIO()
                 result = pisa.CreatePDF(html_string, dest=pdf_bytes)
                 if result.err:
                     return Response(
-                        {"error": f"Error al renderizar el PDF ({result.err} errores de formato)."},
+                        {"error": "Error al generar el PDF."},
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     )
-
-            pdf_bytes.seek(0)
-        except Exception as exc:
-            return Response(
-                {"error": f"Error al generar el PDF: {exc}"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
+                pdf_bytes.seek(0)
+            except Exception as exc2:
+                # Error controlado, sin exponer traceback interno.
+                import logging
+                logger = logging.getLogger("neorx.request")
+                logger.error("PDF generation failed: %s | fallback: %s", exc, exc2)
+                return Response(
+                    {"error": "No se pudo generar el PDF. Contacte al administrador."},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
 
         filename = f"Informe_{paciente.ci}_{informe.estudio.id}.pdf"
         response = FileResponse(pdf_bytes, content_type="application/pdf")
         response["Content-Disposition"] = f'attachment; filename="{filename}"'
+
+        # Auditoría: descarga de PDF
+        log_audit(
+            request,
+            action="export",
+            resource_type="informe",
+            resource_id=str(informe.pk),
+            after={"formato": "pdf", "filename": filename},
+            metadata={"exportado_por": request.user.username if request.user.is_authenticated else "system"},
+        )
+
         return response
 
 
@@ -347,7 +321,7 @@ class DescargarInformeDICOMSRView(APIView):
     """
     GET /api/informes/<pk>/dicom-sr/ — genera y descarga Structured Report DICOM (Basic Text SR).
 
-    Cumple con DICOM PS3.16 (Structured Reporting) — Basic Text SR IOD.
+    Exportación experimental; conformidad DICOM SR/TID pendiente de validación independiente.
     Incluye: Patient Module, Study Module, SR Document Series/Document Modules,
     y Content Tree con hallazgos, impresión y recomendaciones.
     """
@@ -358,7 +332,7 @@ class DescargarInformeDICOMSRView(APIView):
             import pydicom
             from pydicom.uid import (
                 generate_uid, ExplicitVRLittleEndian,
-                BasicTextSRStorage, VerificationSOPClass
+                BasicTextSRStorage
             )
             from pydicom.dataset import Dataset
             from pydicom.sequence import Sequence
@@ -376,7 +350,7 @@ class DescargarInformeDICOMSRView(APIView):
         except InformePreliminar.DoesNotExist:
             return Response({"error": "Informe no encontrado."}, status=status.HTTP_404_NOT_FOUND)
 
-        if informe.estado != "firmado":
+        if informe.estado != "firmado" or not informe.medico_id or not informe.fecha_firmado:
             return Response(
                 {"error": "Solo se pueden exportar informes firmados."},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -398,7 +372,7 @@ class DescargarInformeDICOMSRView(APIView):
 
         # ───── SOP Common Module ─────
         ds.SOPClassUID = BasicTextSRStorage
-        ds.SOPInstanceUID = generate_uid()
+        ds.SOPInstanceUID = ds.file_meta.MediaStorageSOPInstanceUID
 
         # ───── Patient Module ─────
         paciente = informe.estudio.paciente
@@ -509,25 +483,38 @@ class DescargarInformeDICOMSRView(APIView):
                 self._text_item("113002", "DCM", "AI System", "Neo RX CNN ResNet-50 (torchxrayvision)"),
                 self._text_item("113003", "DCM", "AI Version", "1.0"),
                 self._text_item("113004", "DCM", "AI Role", "Decision Support (no autonomous diagnosis)"),
-                self._text_item("113005", "DCM", "Disclaimer", "Este informe es preliminar. Requiere validación y firma del médico radiólogo según Ley 3131."),
+                self._text_item("113005", "DCM", "Disclaimer", "Este informe es preliminar. Requiere validación y firma del médico radiólogo por el profesional responsable."),
             ]
         )
         root.ContentSequence.append(ai_meta)
 
+        ds.ValueType = root.ValueType
+        ds.ConceptNameCodeSequence = root.ConceptNameCodeSequence
+        ds.ContinuityOfContent = root.ContinuityOfContent
         ds.ContentSequence = root.ContentSequence
+        ds.SpecificCharacterSet = "ISO_IR 192"
 
         # ───── Save to BytesIO ─────
         from pydicom.filebase import DicomBytesIO
         buffer = DicomBytesIO()
-        ds.save_as(buffer, write_like_original=False)
+        ds.save_as(buffer, enforce_file_format=True)
         buffer.seek(0)
 
         filename = f"SR_{paciente.ci}_{informe.estudio.id}.dcm"
         response = FileResponse(buffer, content_type="application/dicom")
         response["Content-Disposition"] = f'attachment; filename="{filename}"'
-        return Response(response.getvalue(), content_type="application/dicom", headers={
-            "Content-Disposition": f'attachment; filename="{filename}"'
-        })
+
+        # Auditoría: export DICOM SR
+        log_audit(
+            request,
+            action="export",
+            resource_type="informe",
+            resource_id=str(informe.pk),
+            after={"formato": "dicom-sr", "filename": filename},
+            metadata={"exportado_por": request.user.username if request.user.is_authenticated else "system"},
+        )
+
+        return response
 
     # ──────────────────────────────────────────────────────────────────────────
     # HELPERS para DICOM SR
@@ -564,15 +551,3 @@ class DescargarInformeDICOMSRView(APIView):
         item.ContentSequence = Sequence(children)
         item.RelationshipType = "CONTAINS"
         return item
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# EXPORT: Todas las vistas
-# ──────────────────────────────────────────────────────────────────────────────
-
-__all__ = [
-    "GenerarInformeView",
-    "InformePreliminarDetailView",
-    "DescargarInformePDFView",
-    "DescargarInformeDICOMSRView",
-]

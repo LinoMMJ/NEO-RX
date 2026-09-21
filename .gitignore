@@ -64,3 +64,25 @@ data/
 .agents/
 .atl/
 skills-lock.json
+# Private migration rollback copies
+backend/.backups/
+
+# Training outputs
+backend/training/checkpoints/
+backend/training/runs/
+backend/training/manifests/
+backend/training/results/
+.ipynb_checkpoints/
+
+## Local reports and review evidence
+*.docx
+docs/**/*.txt
+docs/**/*.xml
+docs/**/*.diff
+docs/**/*.png
+docs/**/*.json
+docs/**/*.cjs
+docs/**/*.pdf
+docs/**/__pycache__/
+docs/*.py
+docs/**/*.py

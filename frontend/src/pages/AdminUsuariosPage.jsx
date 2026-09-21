@@ -1,88 +1,90 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import {
-  Users, Plus, Search, Filter, Edit, Trash2, Lock, AlertCircle,
-  ChevronDown, ChevronUp, Eye, Mail, Shield, UserCheck, UserX
+  Plus, Search, Edit, Lock, AlertCircle,
+  ChevronDown, ChevronUp, Mail, Shield, UserCheck, UserX
 } from 'lucide-react'
-import { api } from '../../api'
-import { ToastContainer } from '../../context/ToastContext'
+import { api } from '../api'
+import { useResource } from '../hooks/useWorkspace'
+import { errorMessage, fieldErrors } from '../api/errors'
+import { useToast } from '../context/useToast'
 
 const ROL_LABELS = {
   medico: 'Médico Radiólogo',
-  tecnico: 'Técnico Radiólogo',
+  recepcionista: 'Recepcionista',
   administrador: 'Administrador',
 }
 
 const ROL_COLORS = {
   medico: 'bg-emerald-100 text-emerald-700',
-  tecnico: 'bg-blue-100 text-blue-700',
+  recepcionista: 'bg-blue-100 text-blue-700',
   administrador: 'bg-violet-100 text-violet-700',
 }
 
 const ROL_ICONS = {
   medico: Shield,
-  tecnico: Mail,
+  recepcionista: Mail,
   administrador: UserCheck,
 }
 
 export default function AdminUsuariosPage() {
-  const [usuarios, setUsuarios] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
+  const toast = useToast()
+  const dialogRef = useRef(null)
+  const [formError, setFormError] = useState('')
+  const [formErrors, setFormErrors] = useState({})
   const [page, setPage] = useState(1)
-  const [pageSize] = useState(10)
-  const [total, setTotal] = useState(0)
+  const [pageSize, setPageSize] = useState(10)
   const [search, setSearch] = useState('')
   const [rolFilter, setRolFilter] = useState('')
   const [activoFilter, setActivoFilter] = useState('')
   const [showModal, setShowModal] = useState(false)
   const [editingUser, setEditingUser] = useState(null)
-  const [formData, setFormData] = useState({ username: '', email: '', first_name: '', last_name: '', rol: 'tecnico', password: '' })
+  const [formData, setFormData] = useState({ username: '', email: '', first_name: '', last_name: '', rol: 'recepcionista', is_active: true, password: '' })
   const [submitting, setSubmitting] = useState(false)
   const [sortField, setSortField] = useState('date_joined')
   const [sortDir, setSortDir] = useState('desc')
   const [showPassword, setShowPassword] = useState(false)
   const [resetPasswordUser, setResetPasswordUser] = useState(null)
 
-  const fetchUsuarios = async () => {
-    setLoading(true)
-    try {
-      const params = new URLSearchParams({
-        page,
-        page_size: pageSize,
-        ordering: `${sortDir === 'desc' ? '-' : ''}${sortField}`,
-      })
-      if (search) params.append('search', search)
-      if (rolFilter) params.append('rol', rolFilter)
-      if (activoFilter) params.append('is_active', activoFilter)
+  const [revision, setRevision] = useState(0)
+  const {data, loading, error} = useResource('/admin/users/', {page, page_size: pageSize, search, rol: rolFilter, is_active: activoFilter, ordering: `${sortDir === 'desc' ? '-' : ''}${sortField}`}, revision)
+  const usuarios = data?.results || [], total = data?.count ?? 0
+  const fetchUsuarios = async () => setRevision(v => v + 1)
 
-      const res = await api.get(`/admin/users/?${params.toString()}`)
-      setUsuarios(res.data.results || res.data)
-      setTotal(res.data.count || res.data.length)
-    } catch (err) {
-      setError('Error al cargar usuarios')
-      console.error(err)
-    } finally {
-      setLoading(false)
+  useEffect(() => {
+    if (!showModal) return
+    const previous = document.activeElement
+    const dialog = dialogRef.current
+    dialog?.querySelector('input')?.focus()
+    const keyboard = event => {
+      if (event.key === 'Escape') { setShowModal(false); return }
+      if (event.key !== 'Tab') return
+      const elements = [...dialog.querySelectorAll('input:not([disabled]), select:not([disabled]), button:not([disabled]), a[href]')]
+      const first = elements[0], last = elements.at(-1)
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
     }
-  }
-
-  useEffect(() => { fetchUsuarios() }, [page, search, rolFilter, activoFilter, sortField, sortDir])
+    dialog?.addEventListener('keydown', keyboard)
+    return () => { dialog?.removeEventListener('keydown', keyboard); previous?.focus() }
+  }, [showModal])
 
   const handleSort = (field) => {
+    if (!field) return
     if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
     else { setSortField(field); setSortDir('asc') }
   }
 
   const openCreateModal = () => {
+    setFormError(''); setFormErrors({})
     setEditingUser(null)
-    setFormData({ username: '', email: '', first_name: '', last_name: '', rol: 'tecnico', password: '' })
+    setFormData({ username: '', email: '', first_name: '', last_name: '', rol: 'recepcionista', is_active: true, password: '' })
     setShowModal(true)
   }
 
   const openEditModal = (user) => {
+    setFormError(''); setFormErrors({})
     setEditingUser(user)
-    setFormData({ username: user.username, email: user.email, first_name: user.first_name, last_name: user.last_name, rol: user.rol, password: '' })
+    setFormData({ username: user.username, email: user.email || '', first_name: user.first_name || '', last_name: user.last_name || '', rol: user.rol, is_active: user.is_active, password: '' })
     setShowModal(true)
   }
 
@@ -91,18 +93,20 @@ export default function AdminUsuariosPage() {
   const handleSubmit = async (e) => {
     e.preventDefault()
     setSubmitting(true)
+    setFormError(''); setFormErrors({})
     try {
       const payload = { ...formData }
       if (!payload.password) delete payload.password
       if (editingUser) {
-        await api.put(`/admin/users/${editingUser.id}/`, payload)
+        await api.patch(`/admin/users/${editingUser.id}/`, payload)
       } else {
         await api.post('/admin/users/', payload)
       }
+      toast.success(editingUser ? 'Usuario actualizado.' : 'Usuario creado.')
       closeModal()
-      fetchUsuarios()
+      await fetchUsuarios()
     } catch (err) {
-      console.error(err)
+      setFormError(errorMessage(err)); setFormErrors(fieldErrors(err)); document.getElementById(`user-${Object.keys(fieldErrors(err))[0]}`)?.focus()
     } finally {
       setSubmitting(false)
     }
@@ -112,20 +116,20 @@ export default function AdminUsuariosPage() {
     try {
       await api.post(`/admin/users/${user.id}/toggle_active/`)
       fetchUsuarios()
-    } catch (err) { console.error(err) }
+    } catch (err) { toast.error(errorMessage(err)) }
   }
 
   const handleResetPassword = async (user) => {
-    setResetPasswordUser(user)
+    setResetPasswordUser(user.id)
     try {
       const res = await api.post(`/admin/users/${user.id}/reset_password/`)
       alert(`Password temporal para ${user.username}:\n\n${res.data.temporary_password}\n\nCópiala ahora, no se mostrará de nuevo.`)
-    } catch (err) { console.error(err) }
+    } catch (err) { toast.error(errorMessage(err)) }
     setResetPasswordUser(null)
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="workspace">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
@@ -148,23 +152,26 @@ export default function AdminUsuariosPage() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input
               type="text"
-              placeholder="Buscar (nombre, email, username)..."
+              aria-label="Buscar usuarios"
+              placeholder="Buscar por nombre, correo o usuario…"
               value={search}
               onChange={e => { setSearch(e.target.value); setPage(1) }}
               className="input w-full pl-10 pr-4 py-2"
             />
           </div>
           <select
+            aria-label="Filtrar por rol"
             value={rolFilter}
             onChange={e => { setRolFilter(e.target.value); setPage(1) }}
             className="input py-2"
           >
             <option value="">Todos los roles</option>
             <option value="medico">Médico Radiólogo</option>
-            <option value="tecnico">Técnico Radiólogo</option>
+            <option value="recepcionista">Recepcionista</option>
             <option value="administrador">Administrador</option>
           </select>
           <select
+            aria-label="Filtrar por estado"
             value={activoFilter}
             onChange={e => { setActivoFilter(e.target.value); setPage(1) }}
             className="input py-2"
@@ -175,7 +182,7 @@ export default function AdminUsuariosPage() {
           </select>
           <div className="flex items-center gap-2 text-sm text-slate-500">
             <span>{total} usuarios</span>
-            <select value={pageSize} onChange={e => { pageSize = Number(e.target.value); setPage(1) }} className="input py-1 w-20">
+            <select aria-label="Usuarios por página" value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(1) }} className="input py-1 w-20">
               <option value={5}>5</option>
               <option value={10}>10</option>
               <option value={25}>25</option>
@@ -193,7 +200,7 @@ export default function AdminUsuariosPage() {
           <div className="p-8 text-center text-slate-400">No se encontraron usuarios</div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full">
+            <table className="data-table">
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
                   {[
@@ -205,14 +212,13 @@ export default function AdminUsuariosPage() {
                     { key: 'date_joined', label: 'Creado' },
                     { key: 'actions', label: '' },
                   ].map(col => (
-                    <th key={col.key} className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider cursor-pointer hover:bg-slate-100"
-                        onClick={() => handleSort(col.key === 'username' ? 'username' : col.key === 'email' ? 'email' : col.key === 'first_name' ? 'first_name' : col.key === 'date_joined' ? 'date_joined' : null)}>
-                      <div className="flex items-center gap-1">
-                        {col.label}
+                    <th key={col.key} scope="col" aria-sort={sortField === col.key ? (sortDir === "asc" ? "ascending" : "descending") : undefined} className="px-4 py-3 text-left text-sm font-semibold text-slate-600">
+                      {["username","email","first_name","date_joined"].includes(col.key) ? <button type="button" className="flex items-center gap-1" onClick={() => handleSort(col.key)}>
+                        {col.label || "Acciones"}
                         {sortField === (col.key === 'username' ? 'username' : col.key === 'email' ? 'email' : col.key === 'first_name' ? 'first_name' : col.key === 'date_joined' ? 'date_joined' : null) && (
                           sortDir === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />
                         )}
-                      </div>
+                      </button> : <span>{col.label || "Acciones"}</span>}
                     </th>
                   ))}
                 </tr>
@@ -221,12 +227,12 @@ export default function AdminUsuariosPage() {
                 {usuarios.map((user, i) => (
                   <motion.tr key={user.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }}>
                     <td className="px-4 py-3">
-                      <div className="font-mono font-medium text-navy">{user.username}</td>
+                      <div className="font-mono font-medium text-navy">{user.username}</div></td>
                     <td className="px-4 py-3 font-body text-sm text-slate-600">{user.email || '—'}</td>
-                    <td className="px-4 py-3 font-body text-sm text-slate-700">{user.get_full_name() || '—'}</td>
+                    <td className="px-4 py-3 font-body text-sm text-slate-700">{[user.first_name, user.last_name].filter(Boolean).join(' ') || '—'}</td>
                     <td className="px-4 py-3">
                       <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${ROL_COLORS[user.rol]}`}>
-                        <ROL_ICONS[user.rol] className="w-3 h-3" />
+                        {(() => { const RolIcon = ROL_ICONS[user.rol]; return <RolIcon className="w-3 h-3" /> })()}
                         {ROL_LABELS[user.rol]}
                       </span>
                     </td>
@@ -239,9 +245,9 @@ export default function AdminUsuariosPage() {
                     <td className="px-4 py-3 font-body text-sm text-slate-500">{new Date(user.date_joined).toLocaleDateString('es-BO')}</td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1">
-                        <button onClick={() => openEditModal(user)} className="p-2 text-slate-400 hover:text-navy hover:bg-slate-100 rounded-lg transition" title="Editar"><Edit className="w-4 h-4" /></button>
-                        <button onClick={() => handleToggleActive(user)} className={`p-2 ${user.is_active ? 'text-orange-400 hover:text-orange-600' : 'text-emerald-400 hover:text-emerald-600'} hover:bg-slate-100 rounded-lg transition`} title={user.is_active ? 'Desactivar' : 'Activar'}>{user.is_active ? <UserX className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}</button>
-                        <button onClick={() => handleResetPassword(user)} disabled={resetPasswordUser === user.id} className={`p-2 ${resetPasswordUser === user.id ? 'text-slate-300 cursor-not-allowed' : 'text-blue-400 hover:text-blue-600'} hover:bg-slate-100 rounded-lg transition`} title="Reset password"><Lock className="w-4 h-4" /></button>
+                        <button onClick={() => openEditModal(user)} className="min-h-11 min-w-11 p-2 text-slate-600 hover:text-navy hover:bg-slate-100 rounded-lg transition" aria-label={`Editar a ${user.username}`} title="Editar"><Edit className="w-4 h-4" /></button>
+                        <button onClick={() => handleToggleActive(user)} className={`min-h-11 min-w-11 p-2 ${user.is_active ? 'text-orange-800 hover:text-orange-900' : 'text-emerald-800 hover:text-emerald-900'} hover:bg-slate-100 rounded-lg transition`} aria-label={`${user.is_active ? 'Desactivar' : 'Activar'} a ${user.username}`} title={user.is_active ? 'Desactivar' : 'Activar'}>{user.is_active ? <UserX className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}</button>
+                        <button onClick={() => handleResetPassword(user)} disabled={resetPasswordUser === user.id} className={`min-h-11 min-w-11 p-2 ${resetPasswordUser === user.id ? 'text-slate-300 cursor-not-allowed' : 'text-blue-800 hover:text-blue-900'} hover:bg-slate-100 rounded-lg transition`} aria-label={`Restablecer contraseña de ${user.username}`} title="Restablecer contraseña"><Lock className="w-4 h-4" /></button>
                       </div>
                     </td>
                   </motion.tr>
@@ -266,47 +272,54 @@ export default function AdminUsuariosPage() {
       {/* Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={closeModal}>
-          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+          <motion.div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="user-modal-title" tabIndex={-1} initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="p-6 border-b border-slate-200 flex items-center justify-between">
-              <h2 className="font-heading text-xl font-bold text-navy">{editingUser ? 'Editar usuario' : 'Nuevo usuario'}</h2>
-              <button onClick={closeModal} className="p-2 text-slate-400 hover:text-slate-600">✕</button>
+              <h2 id="user-modal-title" className="font-heading text-xl font-bold text-navy">{editingUser ? 'Editar usuario' : 'Nuevo usuario'}</h2>
+              <button aria-label="Cerrar formulario" onClick={closeModal} className="p-2 text-slate-400 hover:text-slate-600">✕</button>
             </div>
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              {formError && <p role="alert" className="bg-red-50 text-red-700 p-3 rounded-lg">{formError}</p>}
+              <div className="grid sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="label">Usuario *</label>
-                  <input type="text" value={formData.username} onChange={e => setFormData({...formData, username: e.target.value})} className="input mt-1" required disabled={!!editingUser} />
+                  <label htmlFor="user-username" className="label">Usuario *</label>
+                  <input id="user-username" aria-invalid={!!formErrors.username} aria-describedby={formErrors.username ? "user-error-username" : undefined} type="text" value={formData.username} onChange={e => setFormData({...formData, username: e.target.value})} className="input mt-1" required />
+                  {formErrors.username && <p id="user-error-username" className="text-red-700 text-sm">{String(formErrors.username)}</p>}
                 </div>
                 <div>
-                  <label className="label">Email</label>
-                  <input type="email" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} className="input mt-1" />
+                  <label htmlFor="user-email" className="label">Email (para recuperación)</label>
+                  <input id="user-email" aria-invalid={!!formErrors.email} aria-describedby={formErrors.email ? "user-error-email" : undefined} type="email" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} className="input mt-1" />
+                  {formErrors.email && <p id="user-error-email" className="text-red-700 text-sm">{String(formErrors.email)}</p>}
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="label">Nombres</label>
-                  <input type="text" value={formData.first_name} onChange={e => setFormData({...formData, first_name: e.target.value})} className="input mt-1" />
+                  <label htmlFor="user-first_name" className="label">Nombres</label>
+                  <input id="user-first_name" aria-invalid={!!formErrors.first_name} aria-describedby={formErrors.first_name ? "user-error-first_name" : undefined} type="text" value={formData.first_name} onChange={e => setFormData({...formData, first_name: e.target.value})} className="input mt-1" />
+                  {formErrors.first_name && <p id="user-error-first_name" className="text-red-700 text-sm">{String(formErrors.first_name)}</p>}
                 </div>
                 <div>
-                  <label className="label">Apellidos</label>
-                  <input type="text" value={formData.last_name} onChange={e => setFormData({...formData, last_name: e.target.value})} className="input mt-1" />
+                  <label htmlFor="user-last_name" className="label">Apellidos</label>
+                  <input id="user-last_name" aria-invalid={!!formErrors.last_name} aria-describedby={formErrors.last_name ? "user-error-last_name" : undefined} type="text" value={formData.last_name} onChange={e => setFormData({...formData, last_name: e.target.value})} className="input mt-1" />
+                  {formErrors.last_name && <p id="user-error-last_name" className="text-red-700 text-sm">{String(formErrors.last_name)}</p>}
                 </div>
               </div>
               <div>
-                <label className="label">Rol *</label>
-                <select value={formData.rol} onChange={e => setFormData({...formData, rol: e.target.value})} className="input mt-1">
-                  <option value="tecnico">Técnico Radiólogo</option>
+                <label htmlFor="user-rol" className="label">Rol *</label>
+                <select id="user-rol" value={formData.rol} onChange={e => setFormData({...formData, rol: e.target.value})} className="input mt-1">
+                  <option value="recepcionista">Recepcionista</option>
                   <option value="medico">Médico Radiólogo</option>
                   <option value="administrador">Administrador</option>
                 </select>
               </div>
+              <label className="flex gap-2 items-center min-h-11"><input type="checkbox" checked={formData.is_active} onChange={e => setFormData({ ...formData, is_active: e.target.checked })} />Cuenta activa</label>
               <div>
-                <label className="label flex items-center gap-2">
-                  Password {editingUser ? '(dejar vacío para no cambiar)' : '*'}
+                <label htmlFor="user-password" className="label flex items-center gap-2">
+                  Contraseña {editingUser ? '(dejar vacío para no cambiar)' : '*'}
                   <button type="button" onClick={() => setShowPassword(!showPassword)} className="text-xs text-blue-500 hover:underline">{showPassword ? 'Ocultar' : 'Mostrar'}</button>
                 </label>
-                <input type={showPassword ? 'text' : 'password'} value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} className="input mt-1" placeholder={editingUser ? '••••••••' : 'Mínimo 8 caracteres'} required={!editingUser} />
+                <input id="user-password" aria-invalid={!!formErrors.password} aria-describedby={formErrors.password ? "user-error-password" : undefined} autoComplete="new-password" type={showPassword ? 'text' : 'password'} value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} className="input mt-1" placeholder={editingUser ? '••••••••' : 'Mínimo 8 caracteres'} required={!editingUser} />
               </div>
+              {formErrors.password && <p id="user-error-password" className="text-red-700 text-sm">{String(formErrors.password)}</p>}
               <div className="flex justify-end gap-3 pt-4 border-t border-slate-200">
                 <button type="button" onClick={closeModal} className="btn-secondary" disabled={submitting}>Cancelar</button>
                 <button type="submit" className="btn-primary" disabled={submitting}>{submitting ? 'Guardando...' : (editingUser ? 'Actualizar' : 'Crear')}</button>

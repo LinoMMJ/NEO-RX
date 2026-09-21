@@ -14,6 +14,7 @@ from estudios.models import ImagenDICOM
 from .models import ResultadoCNN
 from .serializers import ResultadoCNNSerializer
 from .services import DetectorTorax, PATOLOGIAS_NEUMOLOGIA_BASELINE as PATOLOGIAS_NEUMOLOGIA
+from neorx.models import log_audit
 
 
 @method_decorator(ratelimit(key="ip", rate="60/m", block=True), name="get")
@@ -54,6 +55,7 @@ class ResultadoCNNView(RetrieveAPIView):
                 "tipo": imagen.tipo_proyeccion,
                 "fuente": imagen.proyeccion_fuente,
             }
+
         return Response(data)
 
 
@@ -110,7 +112,8 @@ class GradCAMView(APIView):
             ruta_lower = ruta.lower()
 
             if ruta_lower.endswith(".dcm") or ruta_lower.endswith(".dicom"):
-                ds = pydicom.dcmread(ruta)
+                from estudios.utils import leer_dicom
+                ds = leer_dicom(ruta)
                 arr = ds.pixel_array.astype(np.float32)
                 if getattr(ds, "PhotometricInterpretation", "") == "MONOCHROME1":
                     arr = arr.max() - arr
@@ -133,6 +136,18 @@ class GradCAMView(APIView):
                 modelo, tensor, indice_clase, cam=cam
             )
 
+            # Auditoría: generación de Grad-CAM
+            log_audit(
+                request,
+                action="gradcam",
+                resource_type="imagen_dicom",
+                resource_id=str(imagen.pk),
+                metadata={
+                    "patologia": pathology_en,
+                    "indice_clase": indice_clase,
+                },
+            )
+
             return Response({
                 "overlay": overlay,
                 "solo_calor": solo_calor,
@@ -142,4 +157,4 @@ class GradCAMView(APIView):
             })
 
         except Exception as exc:
-            return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "No se pudo generar la visualización. Revise imagen y configuración del modelo."}, status=status.HTTP_400_BAD_REQUEST)

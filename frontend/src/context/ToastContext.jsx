@@ -1,8 +1,8 @@
-import { createContext, useContext, useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useMemo, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { AlertTriangle, CheckCircle, Info, X } from 'lucide-react'
 
-const ToastContext = createContext(null)
+import { ToastContext } from './useToast'
 
 const ESTILOS = {
   error:   { icon: AlertTriangle, cls: 'bg-danger text-white',  ring: 'ring-danger/30' },
@@ -33,12 +33,13 @@ export function ToastProvider({ children }) {
   }, [dismiss])
 
   // API pública: nunca expone stack traces al usuario
-  const toast = {
+  const toast = useMemo(() => ({
     error:   (m) => push('error', m || MENSAJE_RED),
     success: (m) => push('success', m),
     info:    (m) => push('info', m),
     red:     () => push('error', MENSAJE_RED),
-  }
+  }), [push])
+  useEffect(() => { const pending = timers.current; return () => Object.values(pending).forEach(clearTimeout) }, [])
 
   return (
     <ToastContext.Provider value={toast}>
@@ -79,5 +80,3 @@ export function ToastProvider({ children }) {
     </ToastContext.Provider>
   )
 }
-
-export const useToast = () => useContext(ToastContext)

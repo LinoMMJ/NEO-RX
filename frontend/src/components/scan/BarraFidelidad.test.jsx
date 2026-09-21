@@ -2,6 +2,8 @@ import { render, screen } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import BarraFidelidad from './BarraFidelidad'
 
+vi.mock('../../api', () => ({ api: { get: vi.fn(() => new Promise(() => {})) } }))
+
 describe('BarraFidelidad', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -42,7 +44,7 @@ describe('BarraFidelidad', () => {
 
   it('muestra tiempo de inferencia si se proporciona', () => {
     render(<BarraFidelidad patologiaPrincipal="Neumonía" probabilidad={0.85} tiempoInferencia={0.45} />)
-    expect(screen.getByText('Inferencia: 0.45s')).toBeInTheDocument()
+    expect(screen.getByText((_, element) => element?.tagName === 'SPAN' && element.textContent.includes('Inferencia: 0.45s'))).toBeInTheDocument()
   })
 
   it('muestra umbrales en la barra', () => {

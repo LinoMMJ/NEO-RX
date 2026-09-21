@@ -1,9 +1,13 @@
 from rest_framework import serializers
 from .models import ResultadoCNN
+from .results import probabilities_es
 
 
 class ResultadoCNNSerializer(serializers.ModelSerializer):
-    patologias = serializers.JSONField()
+    patologias = serializers.SerializerMethodField()
+
+    def get_patologias(self, obj):
+        return probabilities_es(obj.patologias)
 
     class Meta:
         model = ResultadoCNN

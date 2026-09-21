@@ -2,6 +2,8 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import ListaPatologias from './ListaPatologias'
 
+vi.mock('../../api', () => ({ api: { get: vi.fn(() => new Promise(() => {})) } }))
+
 describe('ListaPatologias', () => {
   const mockPatologias = {
     'Neumonía': 0.85,
@@ -20,7 +22,7 @@ describe('ListaPatologias', () => {
     expect(screen.getByText('Hallazgos detectados')).toBeInTheDocument()
 
     // Verificar orden descendente
-    const items = screen.getAllByRole('listitem') || screen.getAllByText(/Neumonía|Consolidación|Derrame pleural|Atelectasia/)
+    expect(screen.getByText('Neumonía').compareDocumentPosition(screen.getByText('Consolidación')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(screen.getByText('Neumonía')).toBeInTheDocument()
     expect(screen.getByText('Consolidación')).toBeInTheDocument()
     expect(screen.getByText('Derrame pleural')).toBeInTheDocument()
@@ -46,20 +48,15 @@ describe('ListaPatologias', () => {
     render(<ListaPatologias patologias={mockPatologias} />)
 
     // Neumonía 85% -> ALTO (CRÍTICO)
-    const neumoniaBadge = screen.getByText('ALTO')
+    const neumoniaBadge = screen.getByText('Alto')
     expect(neumoniaBadge).toBeInTheDocument()
 
     // Consolidación 42% -> MODERADO
-    const consolidacionBadge = screen.getByText('MODERADO')
+    const consolidacionBadge = screen.getByText('Moderado')
     expect(consolidacionBadge).toBeInTheDocument()
 
-    // Derrame pleural 15% -> LEVE
-    const derrameBadge = screen.getByText('LEVE')
-    expect(derrameBadge).toBeInTheDocument()
-
-    // Atelectasia 5% -> MARGINAL
-    const atelectasiaBadge = screen.getByText('MARGINAL')
-    expect(atelectasiaBadge).toBeInTheDocument()
+    // Los valores 15% y 5% quedan por debajo del umbral leve (20%).
+    expect(screen.getAllByText('No significativo')).toHaveLength(2)
   })
 
   it('muestra porcentajes correctos', () => {
