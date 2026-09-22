@@ -8,7 +8,7 @@
     <script>
       try {
         const savedTheme = localStorage.getItem('neorx-theme')
-        document.documentElement.dataset.theme = ['clinical', 'dark', 'electric', 'graphite'].includes(savedTheme) ? savedTheme : 'clinical'
+        document.documentElement.dataset.theme = ['clinical', 'hospital', 'wellness', 'diagnostic', 'dark', 'electric', 'graphite'].includes(savedTheme) ? savedTheme : 'clinical'
       } catch { document.documentElement.dataset.theme = 'clinical' }
     </script>
     <title>Neo RX — Diagnóstico Radiológico IA</title>

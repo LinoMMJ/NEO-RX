@@ -3,12 +3,16 @@ import { ThemeContext } from './useTheme'
 
 const THEMES = [
   { id: 'clinical', name: 'Claro clínico', color: '#0f78b8' },
+  { id: 'hospital', name: 'Hospitalario', color: '#1A5F7A' },
+  { id: 'wellness', name: 'Médico moderno', color: '#0E8388' },
+  { id: 'diagnostic', name: 'Diagnóstico premium', color: '#2A3990' },
   { id: 'dark', name: 'Oscuro', color: '#111b2c' },
   { id: 'electric', name: 'Azul eléctrico', color: '#006cff' },
   { id: 'graphite', name: 'Grafito', color: '#3f4857' },
 ]
 
 const validThemes = new Set(THEMES.map(({ id }) => id))
+const lightThemes = new Set(['clinical', 'hospital', 'wellness', 'diagnostic'])
 
 function initialTheme() {
   try {
@@ -28,7 +32,7 @@ export function ThemeProvider({ children }) {
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
-    document.documentElement.style.colorScheme = theme === 'clinical' ? 'light' : 'dark'
+    document.documentElement.style.colorScheme = lightThemes.has(theme) ? 'light' : 'dark'
     try { localStorage.setItem('neorx-theme', theme) } catch { /* La preferencia sigue activa durante la sesión. */ }
   }, [theme])
 

@@ -8,9 +8,10 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "npm run test:unit && npm run test:session",
+    "test": "npm run check:contrast && npm run test:unit && npm run test:session",
     "test:unit": "vitest run",
-    "test:session": "node --test tests/*.test.js"
+    "test:session": "node --test tests/*.test.js",
+    "check:contrast": "node scripts/check-theme-contrast.mjs"
   },
   "dependencies": {
     "axios": "^1.20.0",

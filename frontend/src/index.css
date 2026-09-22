@@ -384,7 +384,6 @@ body {
   -webkit-backdrop-filter: blur(26px) saturate(165%);
   backdrop-filter: blur(26px) saturate(165%);
   transform-origin: top right;
-  animation: theme-popover-in 180ms cubic-bezier(.2,.8,.2,1) both;
 }
 .theme-popover__eyebrow { margin: 0 0 3px; color: var(--accent); font-size: 10px; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }
 .theme-popover__title { margin: 0 0 14px; color: var(--text-heading); font-family: var(--font-heading); font-size: 17px; font-weight: 700; }
@@ -453,4 +452,220 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .workspace > *, .app-main > div > *, .theme-popover { animation: none !important; }
   .sidebar-link:hover, .btn-primary:hover, .btn-secondary:hover, .ui-button:hover, .theme-trigger:hover { transform: none !important; }
+}
+
+/* Paletas clínicas verificadas y estados semánticos */
+html[data-theme="hospital"] {
+  color-scheme: light;
+  --app-bg: #F5F7F8;
+  --app-bg-secondary: #edf3f4;
+  --surface: rgba(255, 255, 255, .80);
+  --surface-solid: #ffffff;
+  --surface-muted: rgba(224, 239, 238, .78);
+  --surface-hover: rgba(203, 231, 227, .70);
+  --glass-highlight: rgba(255, 255, 255, .90);
+  --text-main: #1E293B;
+  --text-heading: #153b4c;
+  --text-muted: #4b6170;
+  --text-subtle: #667b88;
+  --line: rgba(26, 95, 122, .20);
+  --line-strong: rgba(26, 95, 122, .34);
+  --accent: #1A5F7A;
+  --accent-hover: #144b61;
+  --accent-soft: rgba(87, 197, 182, .19);
+  --button-bg: #1A5F7A;
+  --button-text: #ffffff;
+  --link-color: #174f65;
+  --highlight: #57C5B6;
+  --highlight-text: #123b3d;
+  --focus-ring: rgba(87, 197, 182, .48);
+  --sidebar-a: #123f52;
+  --sidebar-b: #1A5F7A;
+  --sidebar-text: #f1fbfa;
+  --shadow-color: 26, 95, 122;
+  --ambient-a: rgba(87, 197, 182, .18);
+  --ambient-b: rgba(26, 95, 122, .10);
+  --success-bg: #e5f5ef;
+  --success-text: #125c43;
+  --warning-bg: #fff3d9;
+  --warning-text: #744500;
+  --danger-bg: #fdeaea;
+  --danger-text: #9d2424;
+}
+
+html[data-theme="wellness"] {
+  color-scheme: light;
+  --app-bg: #F8FAFC;
+  --app-bg-secondary: #eef6f4;
+  --surface: rgba(255, 255, 255, .82);
+  --surface-solid: #ffffff;
+  --surface-muted: rgba(203, 228, 222, .64);
+  --surface-hover: rgba(203, 228, 222, .82);
+  --glass-highlight: rgba(255, 255, 255, .92);
+  --text-main: #0F172A;
+  --text-heading: #102f35;
+  --text-muted: #496268;
+  --text-subtle: #667b80;
+  --line: rgba(14, 131, 136, .19);
+  --line-strong: rgba(14, 131, 136, .34);
+  --accent: #0E8388;
+  --accent-hover: #0b696d;
+  --accent-soft: rgba(203, 228, 222, .72);
+  --button-bg: #0E8388;
+  --button-text: #ffffff;
+  --link-color: #0b696d;
+  --highlight: #CBE4DE;
+  --highlight-text: #123b3d;
+  --focus-ring: rgba(14, 131, 136, .42);
+  --sidebar-a: #073d42;
+  --sidebar-b: #0E6267;
+  --sidebar-text: #edfafa;
+  --shadow-color: 14, 92, 96;
+  --ambient-a: rgba(14, 131, 136, .15);
+  --ambient-b: rgba(203, 228, 222, .42);
+  --success-bg: #def4e9;
+  --success-text: #0e6044;
+  --warning-bg: #fff2d8;
+  --warning-text: #754600;
+  --danger-bg: #fdeaea;
+  --danger-text: #9d2424;
+}
+
+html[data-theme="diagnostic"] {
+  color-scheme: light;
+  --app-bg: #F4F4F6;
+  --app-bg-secondary: #FAFAFA;
+  --surface: rgba(255, 255, 255, .82);
+  --surface-solid: #ffffff;
+  --surface-muted: rgba(238, 240, 248, .82);
+  --surface-hover: rgba(224, 231, 250, .76);
+  --glass-highlight: rgba(255, 255, 255, .94);
+  --text-main: #171b2d;
+  --text-heading: #202967;
+  --text-muted: #515a73;
+  --text-subtle: #6d758a;
+  --line: rgba(42, 57, 144, .18);
+  --line-strong: rgba(42, 57, 144, .32);
+  --accent: #2A3990;
+  --accent-hover: #202d78;
+  --accent-soft: rgba(0, 174, 255, .12);
+  --button-bg: #2A3990;
+  --button-text: #ffffff;
+  --link-color: #155bc1;
+  --highlight: #00AEFF;
+  --highlight-text: #071522;
+  --focus-ring: rgba(0, 174, 255, .44);
+  --sidebar-a: #17205c;
+  --sidebar-b: #2A3990;
+  --sidebar-text: #f1f5ff;
+  --shadow-color: 42, 57, 144;
+  --ambient-a: rgba(0, 174, 255, .18);
+  --ambient-b: rgba(42, 57, 144, .11);
+  --success-bg: #e6f5ee;
+  --success-text: #126247;
+  --warning-bg: #fff2d8;
+  --warning-text: #744500;
+  --danger-bg: #fdeaea;
+  --danger-text: #9d2424;
+}
+
+html[data-theme="clinical"] {
+  --button-bg: #0878b8;
+  --button-text: #ffffff;
+  --link-color: #075f91;
+  --highlight: #57b9ce;
+  --highlight-text: #102a3b;
+  --success-bg: #e7f7f0;
+  --success-text: #126247;
+  --warning-bg: #fff4dc;
+  --warning-text: #7a4a05;
+  --danger-bg: #feecec;
+  --danger-text: #a12323;
+}
+html[data-theme="dark"] {
+  --button-bg: #38a9e6;
+  --button-text: #07131d;
+  --link-color: #72c7f2;
+  --highlight: #38a9e6;
+  --highlight-text: #07131d;
+  --success-bg: #11382e;
+  --success-text: #8fe0bd;
+  --warning-bg: #402f12;
+  --warning-text: #f6cd77;
+  --danger-bg: #431f25;
+  --danger-text: #ffabb2;
+}
+html[data-theme="electric"] {
+  --button-bg: #1677ff;
+  --button-text: #07111f;
+  --link-color: #65b0ff;
+  --highlight: #00b7ff;
+  --highlight-text: #03121d;
+  --success-bg: #0c342d;
+  --success-text: #7de0bd;
+  --warning-bg: #3d2d10;
+  --warning-text: #f5ca6b;
+  --danger-bg: #431c2a;
+  --danger-text: #ff9fb3;
+}
+html[data-theme="graphite"] {
+  --button-bg: #55a9c9;
+  --button-text: #0b1820;
+  --link-color: #87cce4;
+  --highlight: #7bbfd7;
+  --highlight-text: #101a20;
+  --success-bg: #203a31;
+  --success-text: #a0ddc1;
+  --warning-bg: #40351f;
+  --warning-text: #ecd08e;
+  --danger-bg: #45282d;
+  --danger-text: #ffb0b7;
+}
+
+.btn-primary, .ui-button--primary {
+  color: var(--button-text);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--button-bg) 88%, white), var(--button-bg));
+  border-color: color-mix(in srgb, var(--button-bg) 72%, black);
+  box-shadow: 0 8px 20px color-mix(in srgb, var(--button-bg) 25%, transparent), inset 0 1px 0 rgba(255,255,255,.28);
+}
+.btn-primary:hover:not(:disabled), .ui-button--primary:hover:not(:disabled) {
+  color: var(--button-text);
+  background: color-mix(in srgb, var(--button-bg) 86%, black);
+}
+
+.theme-preview--hospital { background: #F5F7F8; }
+.theme-preview--hospital span:first-child { background: #1A5F7A; }
+.theme-preview--hospital span:nth-child(2) { background: #57C5B6; }
+.theme-preview--wellness { background: #F8FAFC; }
+.theme-preview--wellness span:first-child { background: #0E8388; }
+.theme-preview--wellness span:nth-child(2) { background: #CBE4DE; }
+.theme-preview--diagnostic { background: #F4F4F6; }
+.theme-preview--diagnostic span:first-child { background: #2A3990; }
+.theme-preview--diagnostic span:nth-child(2) { background: #00AEFF; }
+
+.app-content .text-sky-800 { color: var(--link-color) !important; }
+.public-reset-page .text-sky-800, .auth-panel .text-sky-800 { color: var(--link-color) !important; }
+.tabs button { transition: color 160ms ease, border-color 160ms ease, background-color 160ms ease, transform 160ms ease; }
+.tabs button[aria-pressed="true"] {
+  color: var(--link-color);
+  border-bottom-color: var(--highlight);
+  background: color-mix(in srgb, var(--highlight) 9%, transparent);
+}
+.status-completado, .status-firmado { background: var(--success-bg); color: var(--success-text); }
+.status-en_proceso, .status-revisado { background: var(--accent-soft); color: var(--link-color); }
+.status-requiere_repeticion, .status-error { background: var(--warning-bg); color: var(--warning-text); }
+.error-state { background: var(--danger-bg); color: var(--danger-text); border-color: color-mix(in srgb, var(--danger-text) 35%, transparent); }
+:focus-visible { outline-color: var(--accent); }
+::selection { background: var(--highlight); color: var(--highlight-text); }
+
+::view-transition-old(root) { animation: theme-fade-out 160ms ease both; }
+::view-transition-new(root) { animation: theme-fade-in 280ms cubic-bezier(.2,.8,.2,1) both; }
+@keyframes theme-fade-out { to { opacity: .35; filter: blur(2px); } }
+@keyframes theme-fade-in { from { opacity: .35; filter: blur(2px); } }
+
+@media (hover: hover) and (pointer: fine) {
+  .tabs button:hover { color: var(--link-color); transform: translateY(-1px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root), ::view-transition-new(root) { animation-duration: .01ms !important; }
 }

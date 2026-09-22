@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { Check, Palette } from 'lucide-react'
 import { useTheme } from '../../context/useTheme'
 
@@ -6,7 +8,14 @@ export default function ThemeSwitcher() {
   const { theme, setTheme, themes } = useTheme()
   const [open, setOpen] = useState(false)
   const containerRef = useRef(null)
+  const reduceMotion = useReducedMotion()
   const activeTheme = themes.find(({ id }) => id === theme) || themes[0]
+
+  const chooseTheme = (nextTheme) => {
+    const update = () => flushSync(() => { setTheme(nextTheme); setOpen(false) })
+    if (!reduceMotion && document.startViewTransition) document.startViewTransition(update)
+    else update()
+  }
 
   useEffect(() => {
     if (!open) return
@@ -39,30 +48,40 @@ export default function ThemeSwitcher() {
         <span className="theme-swatch" style={{ '--swatch': activeTheme.color }} aria-hidden="true" />
       </button>
 
-      {open && (
-        <div className="theme-popover" role="listbox" aria-label="Tema de la interfaz">
-          <p className="theme-popover__eyebrow">Apariencia</p>
-          <p className="theme-popover__title">Elige un ambiente</p>
-          <div className="theme-options">
-            {themes.map((option) => (
-              <button
-                type="button"
-                role="option"
-                aria-selected={option.id === theme}
-                className="theme-option"
-                key={option.id}
-                onClick={() => { setTheme(option.id); setOpen(false) }}
-              >
-                <span className={`theme-preview theme-preview--${option.id}`} aria-hidden="true">
-                  <span /><span /><span />
-                </span>
-                <span>{option.name}</span>
-                {option.id === theme && <Check size={16} className="theme-option__check" aria-hidden="true" />}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            className="theme-popover"
+            role="listbox"
+            aria-label="Tema de la interfaz"
+            initial={reduceMotion ? false : { opacity: 0, transform: 'translateY(-6px) scale(.97)' }}
+            animate={{ opacity: 1, transform: 'translateY(0) scale(1)' }}
+            exit={reduceMotion ? { opacity: 0 } : { opacity: 0, transform: 'translateY(-4px) scale(.98)' }}
+            transition={{ duration: reduceMotion ? .08 : .18, ease: [0.2, 0.8, 0.2, 1] }}
+          >
+            <p className="theme-popover__eyebrow">Apariencia</p>
+            <p className="theme-popover__title">Elige un ambiente</p>
+            <div className="theme-options">
+              {themes.map((option) => (
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={option.id === theme}
+                  className="theme-option"
+                  key={option.id}
+                  onClick={() => chooseTheme(option.id)}
+                >
+                  <span className={`theme-preview theme-preview--${option.id}`} aria-hidden="true">
+                    <span /><span /><span />
+                  </span>
+                  <span>{option.name}</span>
+                  {option.id === theme && <Check size={16} className="theme-option__check" aria-hidden="true" />}
+                </button>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }
