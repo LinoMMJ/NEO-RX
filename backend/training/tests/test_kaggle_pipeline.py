@@ -112,3 +112,9 @@ def test_patient_split_is_deterministic_and_has_no_leakage():
 def test_threshold_optimizer_imports():
     assert ThresholdOptimizer is not None
     assert callable(save_thresholds_csv)
+
+
+def test_training_entrypoints_import():
+    from training import compare, train
+    assert callable(train.main)
+    assert callable(compare.main)

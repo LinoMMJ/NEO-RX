@@ -44,7 +44,7 @@ from training.model import (
     set_head_only,
     unfreeze_partial,
 )
-from training.threshold_optimizer import optimize_thresholds_on_validation, ThresholdOptimizer
+from training.threshold_optimizer import ThresholdOptimizer
 
 
 def parse_args():

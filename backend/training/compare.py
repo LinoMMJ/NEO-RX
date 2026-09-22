@@ -20,7 +20,7 @@ from sklearn.metrics import roc_auc_score
 # Add parent to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from training.dataset import get_dataloaders, NIH_LABELS
+from training.dataset import get_dataloaders
 from training.model import load_finetuned_model
 
 
@@ -158,6 +158,7 @@ def main():
     args = parse_args()
     cfg = load_config(args.config)
     device = get_device(args.device)
+    labels = list(cfg["pulmonary_labels"])
 
     print(f"Device: {device}")
     print(f"Finetuned checkpoint: {args.finetuned_checkpoint}")
@@ -176,7 +177,7 @@ def main():
 
     # Find indices of NIH labels in baseline
     nih_to_baseline_idx = {}
-    for i, label in enumerate(NIH_LABELS):
+    for i, label in enumerate(labels):
         if label in baseline_pathologies:
             nih_to_baseline_idx[i] = baseline_pathologies.index(label)
         else:
@@ -186,11 +187,11 @@ def main():
     print("Evaluating baseline on test set...")
     targets, baseline_logits = evaluate_model(baseline_model, test_loader, device)
     # Map baseline probs to NIH 14 order
-    baseline_probs = np.zeros((targets.shape[0], len(NIH_LABELS)))
+    baseline_probs = np.zeros((targets.shape[0], len(labels)))
     for nih_idx, base_idx in nih_to_baseline_idx.items():
         baseline_probs[:, nih_idx] = baseline_logits[:, base_idx]
 
-    baseline_aucs = compute_aucs(targets, baseline_probs, NIH_LABELS)
+    baseline_aucs = compute_aucs(targets, baseline_probs, labels)
 
     # ---- Fine-tuned model ----
     print(f"\nLoading fine-tuned model from {args.finetuned_checkpoint}...")
@@ -200,14 +201,14 @@ def main():
     # Evaluate fine-tuned
     print("Evaluating fine-tuned on test set...")
     _, finetuned_probs = evaluate_model(finetuned_model, test_loader, device)
-    finetuned_aucs = compute_aucs(targets, finetuned_probs, NIH_LABELS)
+    finetuned_aucs = compute_aucs(targets, finetuned_probs, labels)
 
     # Print comparison
-    print_comparison_table(baseline_aucs, finetuned_aucs, NIH_LABELS)
+    print_comparison_table(baseline_aucs, finetuned_aucs, labels)
 
     # Per-class delta
     deltas = {}
-    for label in NIH_LABELS:
+    for label in labels:
         b = baseline_aucs[label]
         f = finetuned_aucs[label]
         if isinstance(b, float) and b != b:
