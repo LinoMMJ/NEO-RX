@@ -5,6 +5,7 @@ import {
   Activity, MapPin, ChevronDown,
 } from 'lucide-react'
 import ChestXray from '../components/landing/ChestXray'
+import ThemeSwitcher from '../components/layout/ThemeSwitcher'
 
 // Ícono de pulmón (lucide no incluye uno) — stroke 2 para coherencia con el set
 function LungIcon({ className = '' }) {
@@ -63,14 +64,16 @@ export default function LandingPage() {
               NEO <span className="text-teal-med">RX</span>
             </span>
           </div>
-          <button
-            onClick={() => navigate('/login')}
-            className="font-heading font-semibold text-sm px-4 py-2 rounded-lg border border-white/15
-              text-white/90 hover:bg-white/10 hover:border-white/30 transition-all cursor-pointer
-              focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-med/60"
-          >
-            Iniciar sesión
-          </button>
+          <div className="flex items-center gap-2">
+            <ThemeSwitcher />
+            <button
+              onClick={() => navigate('/login')}
+              className="ui-button ui-button--ghost font-heading font-semibold text-sm px-4 py-2 rounded-lg cursor-pointer
+                focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-med/60"
+            >
+              Iniciar sesión
+            </button>
+          </div>
         </div>
       </header>
 

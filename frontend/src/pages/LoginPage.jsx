@@ -4,6 +4,7 @@ import { motion } from 'framer-motion'
 import { Wind, Eye, EyeOff, LogIn } from 'lucide-react'
 import { useAuth } from '../context/useAuth'
 import PasswordResetDialog from '../components/auth/PasswordResetDialog'
+import ThemeSwitcher from '../components/layout/ThemeSwitcher'
 
 export default function LoginPage() {
   const { login } = useAuth()
@@ -30,7 +31,8 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex">
+    <div className="auth-page min-h-screen flex relative">
+      <div className="public-theme-control"><ThemeSwitcher /></div>
       {/* Mitad izquierda — Fondo X-ray */}
       <div className="hidden lg:flex flex-1 relative overflow-hidden bg-scan-bg">
         {/* Gradient overlay */}
@@ -90,7 +92,7 @@ export default function LoginPage() {
       </div>
 
       {/* Mitad derecha — Formulario */}
-      <div className="flex-1 flex items-center justify-center px-8 bg-white">
+      <div className="auth-panel flex-1 flex items-center justify-center px-8 bg-white">
         <motion.div
           className="w-full max-w-sm"
           initial={{ opacity: 0, x: 20 }}
@@ -170,9 +172,8 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full flex items-center justify-center gap-2 py-3 rounded-xl
-                bg-navy hover:bg-navy/90 text-white font-heading font-semibold text-base
-                transition-all shadow-lg shadow-navy/20 disabled:opacity-60 cursor-pointer
+              className="ui-button ui-button--primary w-full flex items-center justify-center gap-2 py-3 rounded-xl
+                text-white font-heading font-semibold text-base disabled:opacity-60 cursor-pointer
                 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-navy/60 mt-2"
             >
               {loading ? (

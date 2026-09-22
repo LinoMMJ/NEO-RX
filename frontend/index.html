@@ -4,6 +4,13 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#edf4f8" />
+    <script>
+      try {
+        const savedTheme = localStorage.getItem('neorx-theme')
+        document.documentElement.dataset.theme = ['clinical', 'dark', 'electric', 'graphite'].includes(savedTheme) ? savedTheme : 'clinical'
+      } catch { document.documentElement.dataset.theme = 'clinical' }
+    </script>
     <title>Neo RX — Diagnóstico Radiológico IA</title>
   </head>
   <body>
