@@ -124,7 +124,11 @@ def test_training_entrypoints_import():
 
 
 def test_xray_transforms_accept_callable_components():
-    image = torch.zeros((1, 1024, 1024), dtype=torch.float32)
-    train_transform = build_train_transform({'augmentation': {'enabled': False}})
-    assert train_transform(image).shape == (1, 512, 512)
-    assert build_eval_transform()(image).shape == (1, 512, 512)
+    image = np.zeros((1, 1024, 1024), dtype=np.float32)
+    train_transform = build_train_transform({'augmentation': {'enabled': True}})
+    train_image = train_transform(image)
+    eval_image = build_eval_transform()(image)
+    assert isinstance(train_image, torch.Tensor)
+    assert isinstance(eval_image, torch.Tensor)
+    assert train_image.shape == (1, 512, 512)
+    assert eval_image.shape == (1, 512, 512)

@@ -29,18 +29,50 @@ def parse_finding_labels(finding_str: str, label_set: set) -> List[str]:
     return [label.strip() for label in str(finding_str).split("|") if label.strip() in label_set]
 
 
+class XRayToTensor:
+    """Convert a TorchXRayVision CHW NumPy array without changing its scale."""
+
+    def __call__(self, array: np.ndarray) -> torch.Tensor:
+        return torch.as_tensor(np.asarray(array), dtype=torch.float32)
+
+
 class GaussianNoise(torch.nn.Module):
     def __init__(self, std: float = 0.01):
         super().__init__()
         self.std = std
 
     def forward(self, tensor: torch.Tensor) -> torch.Tensor:
-        return tensor + torch.randn_like(tensor) * self.std if self.training and self.std > 0 else tensor
+        if self.training and self.std > 0:
+            tensor = tensor + torch.randn_like(tensor) * self.std * 1024.0
+        return tensor.clamp(-1024.0, 1024.0)
+
+
+class XRayIntensityJitter(torch.nn.Module):
+    """Brightness/contrast jitter for TorchXRayVision's [-1024, 1024] scale."""
+
+    def __init__(self, brightness: float = 0.0, contrast: float = 0.0):
+        super().__init__()
+        self.brightness = brightness
+        self.contrast = contrast
+
+    def forward(self, tensor: torch.Tensor) -> torch.Tensor:
+        if self.training and self.contrast > 0:
+            factor = 1.0 + (torch.rand(1).item() * 2.0 - 1.0) * self.contrast
+            mean = tensor.mean(dim=(-2, -1), keepdim=True)
+            tensor = (tensor - mean) * factor + mean
+        if self.training and self.brightness > 0:
+            factor = 1.0 + (torch.rand(1).item() * 2.0 - 1.0) * self.brightness
+            tensor = tensor * factor
+        return tensor.clamp(-1024.0, 1024.0)
 
 
 def build_train_transform(cfg: Dict) -> T.Compose:
     aug = cfg.get("augmentation", {})
-    items = []
+    items = [
+        xrv.datasets.XRayCenterCrop(),
+        xrv.datasets.XRayResizer(512),
+        XRayToTensor(),
+    ]
     if aug.get("enabled", True):
         rotation = aug.get("rotation_degrees", 5)
         if rotation:
@@ -50,17 +82,19 @@ def build_train_transform(cfg: Dict) -> T.Compose:
             items.append(T.RandomAffine(0, translate=(0.05, 0.05), scale=(1 - scale, 1 + scale), fill=-1024))
         brightness, contrast = aug.get("brightness", 0.15), aug.get("contrast", 0.15)
         if brightness or contrast:
-            items.append(T.ColorJitter(brightness=brightness, contrast=contrast))
+            items.append(XRayIntensityJitter(brightness=brightness, contrast=contrast))
         noise = aug.get("gaussian_noise_std", 0.01)
         if noise:
             items.append(GaussianNoise(noise))
-    items.extend([xrv.datasets.XRayCenterCrop(), xrv.datasets.XRayResizer(512)])
     return T.Compose(items)
 
 
 def build_eval_transform() -> T.Compose:
-    return T.Compose([xrv.datasets.XRayCenterCrop(), xrv.datasets.XRayResizer(512)])
-
+    return T.Compose([
+        xrv.datasets.XRayCenterCrop(),
+        xrv.datasets.XRayResizer(512),
+        XRayToTensor(),
+    ])
 
 def _resolve_path(path_value: str, manifest_path: Optional[Path], data_dir: Path) -> Path:
     path = Path(path_value)
@@ -150,9 +184,8 @@ class NIHDataset(Dataset):
         with Image.open(image_path) as image:
             array = np.asarray(image.convert("L"), dtype=np.float32)
         array = xrv.datasets.normalize(array, 255.0)
-        tensor = torch.from_numpy(array[None, :, :] if array.ndim == 2 else array)
-        if self.transform is not None:
-            tensor = self.transform(tensor)
+        array = array[None, :, :] if array.ndim == 2 else array
+        tensor = self.transform(array) if self.transform is not None else XRayToTensor()(array)
         target = torch.zeros(len(self.labels), dtype=torch.float32)
         for label in row["labels"]:
             target[self.label_to_idx[label]] = 1.0
