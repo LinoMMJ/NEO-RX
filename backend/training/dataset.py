@@ -38,7 +38,7 @@ class GaussianNoise(torch.nn.Module):
         return tensor + torch.randn_like(tensor) * self.std if self.training and self.std > 0 else tensor
 
 
-def build_train_transform(cfg: Dict) -> torch.nn.Sequential:
+def build_train_transform(cfg: Dict) -> T.Compose:
     aug = cfg.get("augmentation", {})
     items = []
     if aug.get("enabled", True):
@@ -55,11 +55,11 @@ def build_train_transform(cfg: Dict) -> torch.nn.Sequential:
         if noise:
             items.append(GaussianNoise(noise))
     items.extend([xrv.datasets.XRayCenterCrop(), xrv.datasets.XRayResizer(512)])
-    return torch.nn.Sequential(*items)
+    return T.Compose(items)
 
 
-def build_eval_transform() -> torch.nn.Sequential:
-    return torch.nn.Sequential(xrv.datasets.XRayCenterCrop(), xrv.datasets.XRayResizer(512))
+def build_eval_transform() -> T.Compose:
+    return T.Compose([xrv.datasets.XRayCenterCrop(), xrv.datasets.XRayResizer(512)])
 
 
 def _resolve_path(path_value: str, manifest_path: Optional[Path], data_dir: Path) -> Path:

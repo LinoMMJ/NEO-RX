@@ -6,7 +6,10 @@ import torch
 from PIL import Image
 
 from training.create_splits import PULMONARY_LABELS, candidate_score, split_for_seed
-from training.dataset import IMAGE_COLUMN, _limit_splits, _load_records, _select_split
+from training.dataset import (
+    IMAGE_COLUMN, _limit_splits, _load_records, _select_split,
+    build_eval_transform, build_train_transform,
+)
 from training.model import load_checkpoint, save_checkpoint
 from training.threshold_optimizer import ThresholdOptimizer, save_thresholds_csv
 from training.validate_dataset import index_images, inspect_record
@@ -118,3 +121,10 @@ def test_training_entrypoints_import():
     from training import compare, train
     assert callable(train.main)
     assert callable(compare.main)
+
+
+def test_xray_transforms_accept_callable_components():
+    image = torch.zeros((1, 1024, 1024), dtype=torch.float32)
+    train_transform = build_train_transform({'augmentation': {'enabled': False}})
+    assert train_transform(image).shape == (1, 512, 512)
+    assert build_eval_transform()(image).shape == (1, 512, 512)
