@@ -189,7 +189,7 @@ def train_one_epoch(
         images = images.to(device, non_blocking=True)
         targets = targets.to(device, non_blocking=True)
 
-        optimizer.zero_grad(set_une=True)
+        optimizer.zero_grad(set_to_none=True)
 
         if use_amp and device.type == "cuda":
             with autocast():

@@ -1,4 +1,4 @@
-# Entrenamiento de Neo RX V1.3.6 en Kaggle
+# Entrenamiento de Neo RX V1.3.7 en Kaggle
 
 Este pipeline ajusta el ResNet-50 preentrenado de `torchxrayvision` con NIH ChestX-ray14. El flujo está preparado para usar el nivel gratuito de Kaggle, leer las imágenes directamente desde `/kaggle/input` y guardar todo resultado en `/kaggle/working`.
 
@@ -23,7 +23,7 @@ Este pipeline ajusta el ResNet-50 preentrenado de `torchxrayvision` con NIH Ches
 4. Importa [`notebooks/neorx_training_kaggle.ipynb`](notebooks/neorx_training_kaggle.ipynb).
 5. Ejecuta las celdas en orden con `MODE = "pilot"`.
 6. Si el piloto termina y genera `last.pt`, inicia una sesión limpia, cambia a `MODE = "full"` y ejecuta todo otra vez.
-7. Guarda una versión del Notebook con sus outputs y descarga `neorx-v1.3.6-checkpoints.zip`, `manifests/`, `results/` y `runs/`.
+7. Guarda una versión del Notebook con sus outputs y descarga `neorx-v1.3.7-checkpoints.zip`, `manifests/`, `results/` y `runs/`.
 
 Kaggle puede cambiar el tipo de GPU gratuito disponible y sus límites de sesión. El cuaderno detecta la GPU en lugar de depender de un modelo específico.
 

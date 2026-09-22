@@ -132,3 +132,38 @@ def test_xray_transforms_accept_callable_components():
     assert isinstance(eval_image, torch.Tensor)
     assert train_image.shape == (1, 512, 512)
     assert eval_image.shape == (1, 512, 512)
+
+
+def test_training_step_updates_model():
+    from torch.cuda.amp import GradScaler
+    from torch.utils.data import DataLoader, TensorDataset
+    from training.train import train_one_epoch
+
+    class TinyModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.model = torch.nn.Sequential(torch.nn.Flatten(), torch.nn.Linear(4, 2))
+
+    model = TinyModel()
+    images = torch.randn(4, 1, 2, 2)
+    targets = torch.randint(0, 2, (4, 2), dtype=torch.float32)
+    identifiers = torch.arange(4)
+    loader = DataLoader(TensorDataset(images, targets, identifiers), batch_size=2)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+    before = model.model[1].weight.detach().clone()
+
+    loss = train_one_epoch(
+        model=model,
+        loader=loader,
+        optimizer=optimizer,
+        criterion=torch.nn.BCEWithLogitsLoss(),
+        device=torch.device("cpu"),
+        use_amp=False,
+        scaler=GradScaler(enabled=False),
+        grad_clip=1.0,
+        epoch=0,
+        writer=type("Writer", (), {"add_scalar": lambda *args, **kwargs: None})(),
+    )
+
+    assert np.isfinite(loss)
+    assert not torch.equal(before, model.model[1].weight.detach())
