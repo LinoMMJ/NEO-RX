@@ -8,6 +8,7 @@ from PIL import Image
 from training.create_splits import PULMONARY_LABELS, candidate_score, split_for_seed
 from training.dataset import IMAGE_COLUMN, _limit_splits, _load_records, _select_split
 from training.model import load_checkpoint, save_checkpoint
+from training.threshold_optimizer import ThresholdOptimizer, save_thresholds_csv
 from training.validate_dataset import index_images, inspect_record
 
 
@@ -106,3 +107,8 @@ def test_patient_split_is_deterministic_and_has_no_leakage():
     score, counts = candidate_score(frame, first, PULMONARY_LABELS)
     assert np.isfinite(score)
     assert all((counts[name] > 0).all() for name in counts)
+
+
+def test_threshold_optimizer_imports():
+    assert ThresholdOptimizer is not None
+    assert callable(save_thresholds_csv)
