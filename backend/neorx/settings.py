@@ -195,6 +195,7 @@ USE_TZ = True
 # ─── Static & Media ─────────────────────────────────────────────────────────
 
 STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "static"
 
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
@@ -271,6 +272,12 @@ CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = "America/La_Paz"
 CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 30 * 60
+CELERY_TASK_ROUTES = {
+    "diagnostico.tasks.procesar_imagen_cnn": {
+        "queue": "cnn_inference",
+        "routing_key": "cnn_inference",
+    },
+}
 
 
 # ─── DRF Spectacular / Swagger ──────────────────────────────────────────────

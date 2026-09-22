@@ -253,6 +253,12 @@ def test_upload_dispatches_once(auth_recepcionista, imagen_dicom, settings, tmp_
     assert delay.call_count==1
 
 
+def test_cnn_task_is_routed_to_worker_queue(settings):
+    route = settings.CELERY_TASK_ROUTES['diagnostico.tasks.procesar_imagen_cnn']
+    assert route['queue'] == 'cnn_inference'
+    assert route['routing_key'] == 'cnn_inference'
+
+
 def test_checkpoint_missing_is_unit_error(monkeypatch, tmp_path):
     from diagnostico.services import DetectorTorax
     monkeypatch.setenv('NEORX_MODEL_PATH',str(tmp_path/'absent.pt'))
