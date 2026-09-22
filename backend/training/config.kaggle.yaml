@@ -51,8 +51,8 @@ threshold:
 
 # Experiment tracking
 experiment:
-  name: "neorx_v1_3_7_kaggle"
-  description: "Neo RX v1.3.7 reproducible Kaggle fine-tuning on audited NIH ChestX-ray14"
+  name: "neorx_v1_3_8_kaggle"
+  description: "Neo RX v1.3.8 reproducible Kaggle fine-tuning on audited NIH ChestX-ray14"
   tags: ["pulmonary", "resnet50", "nih-chestxray14", "transfer-learning"]
 
 # Pulmonary-only labels (12 classes - excludes Cardiomegaly, Hernia)

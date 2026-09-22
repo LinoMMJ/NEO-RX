@@ -167,3 +167,18 @@ def test_training_step_updates_model():
 
     assert np.isfinite(loss)
     assert not torch.equal(before, model.model[1].weight.detach())
+
+def test_pos_weight_uses_manifest_without_loading_images():
+    from torch.utils.data import DataLoader
+    from training.dataset import NIHDataset
+    from training.train import calculate_pos_weight
+
+    frame = pd.DataFrame([
+        {"Image Index": "missing-1.png", "Finding Labels": "A|B", "Patient ID": 1, "image_path": "missing-1.png"},
+        {"Image Index": "missing-2.png", "Finding Labels": "A", "Patient ID": 2, "image_path": "missing-2.png"},
+        {"Image Index": "missing-3.png", "Finding Labels": "", "Patient ID": 3, "image_path": "missing-3.png"},
+        {"Image Index": "missing-4.png", "Finding Labels": "", "Patient ID": 4, "image_path": "missing-4.png"},
+    ])
+    loader = DataLoader(NIHDataset(frame, ["A", "B"]), batch_size=2)
+    weights = calculate_pos_weight(loader, 2, torch.device("cpu"))
+    assert torch.allclose(weights, torch.tensor([1.0, 3.0]))

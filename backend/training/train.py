@@ -237,38 +237,37 @@ def log_epoch_csv(csv_path: Path, epoch: int, phase: str, train_loss: float,
 
 
 def calculate_pos_weight(train_loader, num_classes: int, device: torch.device) -> torch.Tensor:
-    """
-    Calculate pos_weight for BCEWithLogitsLoss from TRAIN split only.
-
-    pos_weight = num_negative / num_positive for each class.
-    This balances the loss for imbalanced multi-label classification.
-
-    Returns:
-        Tensor of shape [num_classes] with pos_weight for each class.
-    """
+    """Calculate TRAIN-only class weights without decoding images when metadata is available."""
     print("Calculating pos_weight from TRAIN split...")
     pos_counts = torch.zeros(num_classes, dtype=torch.long)
-    total_counts = 0
+    dataset = train_loader.dataset
 
-    for _, targets, _ in train_loader:
-        pos_counts += targets.sum(dim=0).long()
-        total_counts += targets.shape[0]
+    if hasattr(dataset, "df") and hasattr(dataset, "label_to_idx") and "labels" in dataset.df:
+        total_counts = len(dataset)
+        for sample_labels in dataset.df["labels"]:
+            for label in sample_labels:
+                index = dataset.label_to_idx.get(label)
+                if index is not None:
+                    pos_counts[index] += 1
+        print("  source: validated manifest metadata")
+    else:
+        total_counts = 0
+        for _, targets, _ in train_loader:
+            pos_counts += targets.sum(dim=0).long()
+            total_counts += targets.shape[0]
+        print("  source: DataLoader fallback")
 
     neg_counts = total_counts - pos_counts
-
-    # Avoid division by zero: if a class has no positive samples, set weight to 1.0
     pos_weight = torch.ones(num_classes, dtype=torch.float32)
-    for i in range(num_classes):
-        if pos_counts[i] > 0:
-            pos_weight[i] = neg_counts[i].float() / pos_counts[i].float()
+    for index in range(num_classes):
+        if pos_counts[index] > 0:
+            pos_weight[index] = neg_counts[index].float() / pos_counts[index].float()
         else:
-            pos_weight[i] = 1.0
-            print(f"  WARNING: Class {i} has 0 positive samples in TRAIN, pos_weight=1.0")
+            print(f"  WARNING: Class {index} has 0 positive samples in TRAIN, pos_weight=1.0")
 
     print(f"  pos_weight: {pos_weight.tolist()}")
     print(f"  pos_counts: {pos_counts.tolist()}")
     print(f"  neg_counts: {neg_counts.tolist()}")
-
     return pos_weight.to(device)
 
 
