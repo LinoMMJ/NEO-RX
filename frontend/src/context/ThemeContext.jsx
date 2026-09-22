@@ -2,12 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ThemeContext } from './useTheme'
 
 const THEMES = [
-  { id: 'clinical', name: 'Claro clínico', color: '#0f78b8' },
-  { id: 'hospital', name: 'Hospitalario', color: '#1A5F7A' },
-  { id: 'wellness', name: 'Médico moderno', color: '#0E8388' },
-  { id: 'diagnostic', name: 'Diagnóstico premium', color: '#2A3990' },
-  { id: 'dark', name: 'Oscuro', color: '#111b2c' },
-  { id: 'electric', name: 'Azul eléctrico', color: '#006cff' },
+  { id: 'clinical', name: 'Claro', color: '#0f78b8' },
+  { id: 'hospital', name: 'Hospital', color: '#1A5F7A' },
+  { id: 'wellness', name: 'Menta', color: '#0E8388' },
+  { id: 'diagnostic', name: 'Índigo', color: '#2A3990' },
+  { id: 'dark', name: 'Noche', color: '#111b2c' },
+  { id: 'electric', name: 'Eléctrico', color: '#006cff' },
   { id: 'graphite', name: 'Grafito', color: '#3f4857' },
 ]
 

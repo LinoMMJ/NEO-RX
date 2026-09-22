@@ -34,9 +34,9 @@ export default function LoginPage() {
     <div className="auth-page min-h-screen flex relative">
       <div className="public-theme-control"><ThemeSwitcher /></div>
       {/* Mitad izquierda — Fondo X-ray */}
-      <div className="hidden lg:flex flex-1 relative overflow-hidden bg-scan-bg">
+      <div className="auth-visual hidden lg:flex flex-1 relative overflow-hidden bg-scan-bg">
         {/* Gradient overlay */}
-        <div className="absolute inset-0 bg-gradient-to-br from-navy via-scan-bg to-surface" />
+        <div className="auth-visual-backdrop absolute inset-0 bg-gradient-to-br from-navy via-scan-bg to-surface" />
 
         {/* Patrón de puntos decorativo */}
         <div className="absolute inset-0 opacity-10"

@@ -11,7 +11,10 @@ export default function ThemeSwitcher() {
   const reduceMotion = useReducedMotion()
   const activeTheme = themes.find(({ id }) => id === theme) || themes[0]
 
-  const chooseTheme = (nextTheme) => {
+  const chooseTheme = (nextTheme, event) => {
+    const rect = event.currentTarget.getBoundingClientRect()
+    document.documentElement.style.setProperty('--theme-x', `${rect.left + rect.width / 2}px`)
+    document.documentElement.style.setProperty('--theme-y', `${rect.top + rect.height / 2}px`)
     const update = () => flushSync(() => { setTheme(nextTheme); setOpen(false) })
     if (!reduceMotion && document.startViewTransition) document.startViewTransition(update)
     else update()
@@ -45,7 +48,7 @@ export default function ThemeSwitcher() {
       >
         <Palette size={17} aria-hidden="true" />
         <span className="hidden md:inline">{activeTheme.name}</span>
-        <span className="theme-swatch" style={{ '--swatch': activeTheme.color }} aria-hidden="true" />
+        <span key={theme} className="theme-swatch" style={{ '--swatch': activeTheme.color }} aria-hidden="true" />
       </button>
 
       <AnimatePresence>
@@ -54,13 +57,13 @@ export default function ThemeSwitcher() {
             className="theme-popover"
             role="listbox"
             aria-label="Tema de la interfaz"
-            initial={reduceMotion ? false : { opacity: 0, transform: 'translateY(-6px) scale(.97)' }}
-            animate={{ opacity: 1, transform: 'translateY(0) scale(1)' }}
-            exit={reduceMotion ? { opacity: 0 } : { opacity: 0, transform: 'translateY(-4px) scale(.98)' }}
-            transition={{ duration: reduceMotion ? .08 : .18, ease: [0.2, 0.8, 0.2, 1] }}
+            initial={reduceMotion ? false : { opacity: 0, transform: 'translateY(-8px) scale(.96)', filter: 'blur(3px)' }}
+            animate={{ opacity: 1, transform: 'translateY(0) scale(1)', filter: 'blur(0)' }}
+            exit={reduceMotion ? { opacity: 0 } : { opacity: 0, transform: 'translateY(-5px) scale(.98)', filter: 'blur(2px)' }}
+            transition={{ duration: reduceMotion ? .08 : .22, ease: [0.2, 0.8, 0.2, 1] }}
           >
             <p className="theme-popover__eyebrow">Apariencia</p>
-            <p className="theme-popover__title">Elige un ambiente</p>
+            <p className="theme-popover__title">Elige un tema</p>
             <div className="theme-options">
               {themes.map((option) => (
                 <button
@@ -69,7 +72,7 @@ export default function ThemeSwitcher() {
                   aria-selected={option.id === theme}
                   className="theme-option"
                   key={option.id}
-                  onClick={() => chooseTheme(option.id)}
+                  onClick={(event) => chooseTheme(option.id, event)}
                 >
                   <span className={`theme-preview theme-preview--${option.id}`} aria-hidden="true">
                     <span /><span /><span />

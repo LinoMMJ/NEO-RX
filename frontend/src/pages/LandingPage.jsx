@@ -52,9 +52,9 @@ export default function LandingPage() {
   const irDemo = () => document.getElementById('demo')?.scrollIntoView({ behavior: 'smooth' })
 
   return (
-    <div className="bg-scan-bg text-white font-body">
+    <div className="landing-shell bg-scan-bg text-white font-body">
       {/* ════════ NAVBAR ════════ */}
-      <header className="fixed top-0 inset-x-0 z-50 backdrop-blur-md bg-scan-bg/70 border-b border-white/5">
+      <header className="landing-nav fixed top-0 inset-x-0 z-50 backdrop-blur-md bg-scan-bg/70 border-b border-white/5">
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-lg bg-teal-med/20 border border-teal-med/40 flex items-center justify-center">
@@ -80,7 +80,7 @@ export default function LandingPage() {
       {/* ════════ HERO ════════ */}
       <section className="relative min-h-screen flex items-center overflow-hidden pt-16">
         {/* Atmósfera de fondo */}
-        <div className="absolute inset-0 bg-gradient-to-br from-navy via-scan-bg to-[#06101f]" />
+        <div className="landing-hero-backdrop absolute inset-0 bg-gradient-to-br from-navy via-scan-bg to-[#06101f]" />
         <div className="absolute inset-0 opacity-[0.06]" style={{
           backgroundImage: 'radial-gradient(circle, #38bdf8 1px, transparent 1px)',
           backgroundSize: '38px 38px',
@@ -209,7 +209,7 @@ export default function LandingPage() {
       </section>
 
       {/* ════════ DEMO ════════ */}
-      <section id="demo" className="bg-[#F0F4F8] text-navy py-24">
+      <section id="demo" className="landing-demo bg-[#F0F4F8] text-navy py-24">
         <div className="max-w-6xl mx-auto px-6">
           <div className="text-center max-w-2xl mx-auto mb-14">
             <p className="font-mono text-xs text-teal-med tracking-[0.2em] uppercase mb-3">Demostración</p>

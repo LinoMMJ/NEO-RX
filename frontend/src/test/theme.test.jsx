@@ -13,7 +13,7 @@ describe('selector de temas', () => {
     render(<ThemeProvider><ThemeSwitcher /></ThemeProvider>)
     fireEvent.click(screen.getByRole('button', { name: /Tema actual:/ }))
     expect(screen.getAllByRole('option')).toHaveLength(7)
-    fireEvent.click(screen.getByRole('option', { name: 'Hospitalario' }))
+    fireEvent.click(screen.getByRole('option', { name: 'Hospital' }))
 
     await waitFor(() => expect(document.documentElement.dataset.theme).toBe('hospital'))
     expect(document.documentElement.style.colorScheme).toBe('light')
@@ -26,6 +26,6 @@ describe('selector de temas', () => {
 
     await waitFor(() => expect(document.documentElement.dataset.theme).toBe('electric'))
     expect(document.documentElement.style.colorScheme).toBe('dark')
-    expect(screen.getByRole('button', { name: /Azul eléctrico/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Eléctrico/ })).toBeInTheDocument()
   })
 })
