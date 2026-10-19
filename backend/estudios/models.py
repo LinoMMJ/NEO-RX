@@ -7,7 +7,14 @@ class ImagenDICOM(models.Model):
     ESTADO_PROC_CHOICES = [
         ("pendiente", "Pendiente"),
         ("procesado", "Procesado"),
+        ("sin_analisis", "Guardada sin analisis CNN"),
         ("error", "Error"),
+    ]
+    CLASIFICACION_CHOICES = [
+        ("indeterminate", "Indeterminada"),
+        ("chest_xray", "Radiografia de torax"),
+        ("other_xray", "Otra radiografia"),
+        ("not_xray", "No radiografica"),
     ]
     estudio = models.ForeignKey(Estudio, on_delete=models.CASCADE, related_name="imagenes")
     # Ruta interna; el binario no está cifrado. Se entrega mediante una vista autenticada.
@@ -18,6 +25,15 @@ class ImagenDICOM(models.Model):
     varianza_laplaciana = models.FloatField(null=True)
     tipo_proyeccion = models.CharField(max_length=10, blank=True)       # PA | AP | LAT
     proyeccion_fuente = models.CharField(max_length=20, blank=True)     # dicom_tag | inferencia
+    clasificacion_imagen = models.CharField(
+        max_length=24, choices=CLASIFICACION_CHOICES, default="indeterminate"
+    )
+    region_anatomica = models.CharField(max_length=80, blank=True)
+    es_radiografia = models.BooleanField(null=True)
+    apta_para_cnn = models.BooleanField(default=False)
+    confianza_clasificacion = models.FloatField(null=True, blank=True)
+    fuente_clasificacion = models.CharField(max_length=32, blank=True)
+    motivo_no_cnn = models.TextField(blank=True)
     estado_procesamiento = models.CharField(
         max_length=20, choices=ESTADO_PROC_CHOICES, default="pendiente"
     )

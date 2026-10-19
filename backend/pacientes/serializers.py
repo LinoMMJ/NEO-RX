@@ -1,11 +1,13 @@
 from rest_framework import serializers
 from .models import Paciente, Estudio
+from neorx.validation import clean_plain_text
 
 
 class PacienteSerializer(serializers.ModelSerializer):
     ci = serializers.CharField(max_length=20)
 
     def validate_ci(self, value):
+        value = clean_plain_text(value, max_length=20, field_name="identificador")
         from neorx.encryption import ci_digest
         qs = Paciente.objects.filter(ci_search_hash=ci_digest(value))
         if self.instance:
@@ -13,6 +15,15 @@ class PacienteSerializer(serializers.ModelSerializer):
         if qs.exists():
             raise serializers.ValidationError("Ya existe un paciente con este identificador.")
         return value
+
+    def validate_nombres(self, value):
+        return clean_plain_text(value, max_length=100, field_name="nombres")
+
+    def validate_apellidos(self, value):
+        return clean_plain_text(value, max_length=100, field_name="apellidos")
+
+    def validate_telefono(self, value):
+        return clean_plain_text(value, max_length=20, field_name="teléfono")
 
     class Meta:
         model = Paciente
@@ -41,7 +52,22 @@ class EstudioSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"paciente": "No se puede reasignar el paciente de un estudio existente."})
         return attrs
 
+    def validate_tipo_estudio(self, value):
+        return clean_plain_text(value, max_length=200, field_name="tipo de estudio")
+
+    def validate_observaciones(self, value):
+        return clean_plain_text(
+            value, max_length=5000, field_name="observaciones", allow_newlines=True
+        )
+
     class Meta:
         model = Estudio
-        fields = "__all__"
-        read_only_fields = ("id", "created_at")
+        fields = (
+            "id", "paciente", "paciente_nombre", "fecha", "tipo_estudio",
+            "observaciones", "estado", "created_at", "informe_id",
+            "informe_estado", "ultima_imagen_id",
+        )
+        read_only_fields = (
+            "id", "created_at", "paciente_nombre", "informe_id",
+            "informe_estado", "ultima_imagen_id",
+        )

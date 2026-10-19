@@ -23,8 +23,14 @@ export default function LoginPage() {
     try {
       await login(form.username, form.password, remember)
       navigate('/dashboard')
-    } catch {
-      setError('Credenciales incorrectas. Verifica tu usuario o correo y contraseña.')
+    } catch (error) {
+      setError(!error.response
+        ? 'No se pudo conectar con el servidor. Verifica que esté iniciado y que la conexión esté disponible.'
+        : error.response.status === 429
+          ? 'Demasiados intentos. Espera antes de volver a iniciar sesión.'
+          : error.response.status >= 500
+            ? 'El servidor no pudo completar el inicio de sesión. Intenta nuevamente.'
+            : 'Credenciales incorrectas. Verifica tu usuario o correo y contraseña.')
     } finally {
       setLoading(false)
     }
@@ -181,7 +187,7 @@ export default function LoginPage() {
               ) : (
                 <LogIn className="w-4 h-4" />
               )}
-              {loading ? 'Verificando...' : 'Ingresar'}
+              {loading ? 'Verificando…' : 'Ingresar'}
             </button>
           </form>
 

@@ -29,7 +29,7 @@ const FEATURES = [
   },
   {
     icon: LungIcon,
-    title: '13 patologías neumológicas',
+    title: '12 patologías neumológicas',
     text: 'Neumonía, consolidaciones, nódulos, derrames y más, con probabilidades calibradas y mapas Grad-CAM.',
   },
   {

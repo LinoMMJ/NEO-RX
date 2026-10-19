@@ -23,6 +23,17 @@ def procesar_imagen_cnn(self, imagen_id):
         imagen = ImagenDICOM.objects.get(pk=imagen_id)
         logger.info(f"[CNN TASK {self.request.id}] Procesando imagen #{imagen_id}...")
 
+        if not imagen.apta_para_cnn or imagen.clasificacion_imagen != "chest_xray":
+            imagen.estado_procesamiento = "sin_analisis"
+            imagen.motivo_no_cnn = imagen.motivo_no_cnn or "La imagen no es elegible para la CNN de tórax."
+            imagen.save(update_fields=["estado_procesamiento", "motivo_no_cnn"])
+            return {
+                "status": "STORED",
+                "imagen_id": imagen_id,
+                "estudio_id": imagen.estudio_id,
+                "mensaje": "Radiografía almacenada sin análisis CNN.",
+            }
+
         ruta = str(imagen.archivo_dicom.path)
         es_dicom = ruta.lower().endswith(('.dcm', '.dicom'))
 
@@ -32,10 +43,13 @@ def procesar_imagen_cnn(self, imagen_id):
 
         res_cnn, _ = ResultadoCNN.objects.update_or_create(
             imagen=imagen,
-            defaults={'patologias': probabilities_es(resultado), 'tiempo_inferencia_seg': tiempo},
+            defaults={'patologias': resultado, 'tiempo_inferencia_seg': tiempo},
         )
         imagen.estado_procesamiento = 'procesado'
-        imagen.save()
+        imagen.save(update_fields=["estado_procesamiento"])
+
+        from informes.services import create_ai_draft_report
+        informe, _ = create_ai_draft_report(imagen.estudio, imagen, res_cnn)
 
         log_audit(None, action="process", resource_type="resultado_cnn", resource_id=str(res_cnn.pk),
                   metadata={"imagen_id": imagen_id, "estado": "procesado"})
@@ -43,8 +57,14 @@ def procesar_imagen_cnn(self, imagen_id):
         return {
             'imagen_id': imagen_id,
             'resultado_id': res_cnn.id,
+            'estudio_id': imagen.estudio_id,
+            'informe_id': informe.id,
+            'informe_estado': informe.estado,
             'patologias': probabilities_es(resultado),
             'tiempo_inferencia_seg': tiempo,
+            'modelo': resultado.get('modelo', 'cnn'),
+            'es_fine_tuned': bool(resultado.get('es_fine_tuned', False)),
+            'resolucion_entrada': DetectorTorax._input_size,
         }
 
     except Exception as e:

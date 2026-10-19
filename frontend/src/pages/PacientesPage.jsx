@@ -23,6 +23,11 @@ export default function PacientesPage() {
   const {data, loading, error: listError} = useResource('/pacientes/', filters, revision)
   const patients = data?.results || [], total = data?.count ?? 0
   useEffect(() => { if (showForm) { formRef.current?.scrollIntoView({ behavior: 'auto', block: 'start' }); formRef.current?.querySelector('input')?.focus() } }, [showForm, editing])
+  useEffect(() => {
+    if (filters.accion !== 'nuevo' || !canEdit) return
+    open()
+    setFilter('accion', '')
+  }, [filters.accion, canEdit]) // eslint-disable-line react-hooks/exhaustive-deps
   function open(patient = null) {
     setEditing(patient); setForm(patient ? Object.fromEntries(Object.keys(empty).map(key => [key, patient[key] || ''])) : { ...empty })
     setError(''); setErrors({}); setShowForm(true)

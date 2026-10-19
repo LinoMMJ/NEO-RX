@@ -31,6 +31,37 @@ ALLOWED_HOSTS = os.getenv(
     "localhost,127.0.0.1",
 ).split(",")
 
+# Django confía en HTTPS únicamente cuando la petición llega desde el proxy
+# interno configurado por Neo RX. El healthcheck directo queda exento del
+# redirect porque Gunicorn no termina TLS por sí mismo.
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+SECURE_SSL_REDIRECT = os.getenv("SECURE_SSL_REDIRECT", str(not DEBUG)).lower() == "true"
+SECURE_REDIRECT_EXEMPT = [r"^health/$"]
+SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "31536000" if not DEBUG else "0"))
+SECURE_HSTS_INCLUDE_SUBDOMAINS = not DEBUG
+SECURE_HSTS_PRELOAD = not DEBUG
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
+SECURE_CROSS_ORIGIN_OPENER_POLICY = "same-origin"
+X_FRAME_OPTIONS = "DENY"
+
+# Cookies de Django (admin y CSRF). La API clínica usa JWT en Authorization,
+# pero estas cookies también deben estar protegidas en el despliegue intranet.
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SECURE = not DEBUG
+SESSION_COOKIE_SAMESITE = "Strict"
+CSRF_COOKIE_HTTPONLY = True
+CSRF_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SAMESITE = "Strict"
+
+# Un request solo puede adjuntar una radiografía. Los archivos grandes se
+# escriben a disco temporal en lugar de permanecer completos en memoria.
+DATA_UPLOAD_MAX_NUMBER_FILES = 1
+DATA_UPLOAD_MAX_NUMBER_FIELDS = 40
+FILE_UPLOAD_MAX_MEMORY_SIZE = 2 * 1024 * 1024
+FILE_UPLOAD_PERMISSIONS = 0o600
+FILE_UPLOAD_DIRECTORY_PERMISSIONS = 0o700
+
 AUTH_USER_MODEL = "accounts.CustomUser"
 EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", "django.core.mail.backends.locmem.EmailBackend")
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "noreply@neorx.local")
@@ -242,6 +273,7 @@ SIMPLE_JWT = {
     "ROTATE_REFRESH_TOKENS": True,
     "BLACKLIST_AFTER_ROTATION": True,
     "CHECK_REVOKE_TOKEN": True,
+    "AUTH_HEADER_TYPES": ("Bearer",),
 }
 
 
@@ -271,7 +303,11 @@ CELERY_RESULT_SERIALIZER = "json"
 
 CELERY_TIMEZONE = "America/La_Paz"
 CELERY_TASK_TRACK_STARTED = True
-CELERY_TASK_TIME_LIMIT = 30 * 60
+# Desarrollo local: ejecutar el diagnóstico en el request para no depender de
+# un worker Celery ausente. Producción puede configurar "celery" explícitamente.
+NEORX_INFERENCE_MODE = os.getenv("NEORX_INFERENCE_MODE", "inline" if DEBUG else "celery").lower()
+CELERY_TASK_SOFT_TIME_LIMIT = int(os.getenv("NEORX_CNN_SOFT_LIMIT", "90"))
+CELERY_TASK_TIME_LIMIT = int(os.getenv("NEORX_CNN_TIME_LIMIT", "120"))
 CELERY_TASK_ROUTES = {
     "diagnostico.tasks.procesar_imagen_cnn": {
         "queue": "cnn_inference",
@@ -360,6 +396,15 @@ RATELIMIT_BLOCK = True
 
 # No configuramos Redis aquí porque actualmente no lo estás usando
 # para el desarrollo local.
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "neorx-local-cache",
+        "TIMEOUT": 60 * 60 * 12,
+        "OPTIONS": {"MAX_ENTRIES": 256, "CULL_FREQUENCY": 4},
+    }
+}
+GRADCAM_CACHE_TIMEOUT = 60 * 60 * 12
 
 
 # ─── Logging ────────────────────────────────────────────────────────────────

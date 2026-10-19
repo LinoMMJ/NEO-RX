@@ -10,6 +10,10 @@ class InformePreliminar(models.Model):
         ("firmado", "Firmado"),
     ]
     estudio = models.OneToOneField(Estudio, on_delete=models.CASCADE, related_name="informe")
+    imagen_origen = models.ForeignKey(
+        "estudios.ImagenDICOM", null=True, blank=True,
+        on_delete=models.RESTRICT, related_name="informes_origen",
+    )
     medico = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -20,6 +24,7 @@ class InformePreliminar(models.Model):
     )
     tecnica = models.TextField(default="Radiografía de Tórax PA. Técnica digital.")
     hallazgos = models.TextField(blank=True)
+    correlacion_clinica = models.TextField(blank=True)
     impresion = models.TextField(blank=True)
     recomendaciones = models.TextField(blank=True)
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default="borrador")

@@ -105,6 +105,30 @@ class MetricasOperacionalesView(APIView):
             "muestras": len(latencias_horas),
         }
 
+        # Métricas reales de inferencia, calculadas a partir de resultados ya
+        # almacenados. Reemplaza el estado fijo de demostración del dashboard.
+        resultados_cnn = ResultadoCNN.objects.filter(
+            fecha_analisis__date__range=(fecha_inicio, fecha_fin)
+        )
+        total_resultados_cnn = resultados_cnn.count()
+        tiempos_cnn = [
+            float(tiempo)
+            for tiempo in resultados_cnn.values_list("tiempo_inferencia_seg", flat=True)
+            if tiempo is not None
+        ]
+        metricas_cnn = {
+            "estado": "operativo" if total_resultados_cnn else "sin_datos",
+            "analisis_realizados": total_resultados_cnn,
+            "tiempo_promedio_seg": round(sum(tiempos_cnn) / len(tiempos_cnn), 2) if tiempos_cnn else 0,
+            "p50_seg": percentil(tiempos_cnn, 50),
+            "p95_seg": percentil(tiempos_cnn, 95),
+            "detalle": (
+                "Métricas calculadas con resultados CNN del período seleccionado."
+                if total_resultados_cnn else
+                "Aún no existen análisis CNN finalizados en el período seleccionado."
+            ),
+        }
+
         # ──────────────────────────────────────────────────────────────────────
         # 3. % Completados vs Pendientes
         # ──────────────────────────────────────────────────────────────────────
@@ -169,7 +193,7 @@ class MetricasOperacionalesView(APIView):
         # RESPUESTA
         # ──────────────────────────────────────────────────────────────────────
         return Response({
-            "metricas_cnn": {"estado": "pendiente", "detail": "Resultado pendiente de ejecución experimental."},
+            "metricas_cnn": metricas_cnn,
             "periodo_dias": dias,
             "fecha_inicio": fecha_inicio.isoformat(),
             "fecha_fin": fecha_fin.isoformat(),

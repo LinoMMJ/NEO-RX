@@ -7,5 +7,11 @@ class ImagenDICOMSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ImagenDICOM
-        fields = "__all__"
-        read_only_fields = ("id", "fecha_subida", "es_nitida", "varianza_laplaciana", "estado_procesamiento")
+        fields = (
+            "id", "estudio", "archivo_dicom", "archivo_png", "fecha_subida",
+            "es_nitida", "varianza_laplaciana", "tipo_proyeccion",
+            "proyeccion_fuente", "clasificacion_imagen", "region_anatomica",
+            "es_radiografia", "apta_para_cnn", "confianza_clasificacion",
+            "fuente_clasificacion", "motivo_no_cnn", "estado_procesamiento",
+        )
+        read_only_fields = fields

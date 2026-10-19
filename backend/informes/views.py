@@ -45,26 +45,68 @@ from neorx.permissions import MedicalWritePermission
 # Usar acentos aquí provocaría .get() == 0 y el informe saldría siempre vacío.
 
 def _pct(v):
-    return f"{v * 100:.0f}%"
+    return "≥99.9/100" if v >= 0.999 else f"{v * 100:.1f}/100"
 
 
 def generar_texto_hallazgos(resultado_cnn, tipo_proyeccion):
-    from diagnostico.results import probabilities_es
-    probabilities = probabilities_es(resultado_cnn.patologias)
-    lines = ["Resultado preliminar de IA; requiere revisión profesional."]
-    lines.extend(f"{label}: probabilidad estimada {_pct(value)}."
-                 for label, value in sorted(probabilities.items(), key=lambda item: item[1], reverse=True))
-    if not probabilities:
-        lines.append("Sin probabilidades disponibles; no permite descartar hallazgos.")
+    from diagnostico.results import threshold_findings
+    findings = threshold_findings(resultado_cnn.patologias)
+    candidates = [item for item in findings if item['detectado']]
+    lines = [
+        "Plantilla de lectura radiográfica de tórax — borrador asistido por IA.",
+        f"Proyección: {tipo_proyeccion}.",
+        "",
+        "PARÉNQUIMA PULMONAR",
+        "• Opacidades o infiltrados: [describir presencia, patrón y localización].",
+        "• Broncograma aéreo: [valorar si está presente o ausente].",
+        "",
+        "PLEURAS Y SILUETA CARDIOMEDIASTÍNICA",
+        "• Derrame pleural / neumotórax: [describir si corresponde].",
+        "• Tamaño cardiaco y mediastino: [describir hallazgos].",
+        "",
+        "APOYO DE IA — NO CONFIRMA HALLAZGOS",
+    ]
+    lines.extend(
+        f"• {item['etiqueta']}: señal {_pct(item['probabilidad_estimada'])}; umbral {_pct(item['threshold_usado'])}. Pendiente de confirmar en imagen."
+        for item in candidates
+    )
+    if not findings:
+        lines.append("• Sin umbrales registrados; consultar la salida técnica del análisis.")
+    elif not candidates:
+        lines.append("• Ninguna señal supera su umbral. No permite descartar enfermedad.")
+    elif len(candidates) > 1:
+        lines.append("• Múltiples señales: pueden coexistir hallazgos o falsos positivos; no se puede seleccionar un diagnóstico único automáticamente.")
+    lines.append("Las puntuaciones no son porcentajes de certeza. El detalle completo se conserva en el análisis.")
+    lines.extend([
+        "",
+        "La localización, lateralidad y los signos radiológicos deben ser confirmados y completados por el médico radiólogo.",
+    ])
     return "\n".join(lines)
 
 
+def generar_correlacion_clinica():
+    return (
+        "Síntomas y evolución: [completar tos, expectoración, fiebre, disnea u otros datos relevantes].\n"
+        "Exploración física: [completar auscultación y signos clínicos].\n"
+        "Laboratorio / estudios previos: [completar si corresponde].\n"
+        "Correlación clínico-radiológica pendiente de valoración médica."
+    )
+
+
 def generar_impresion(resultado_cnn):
-    return "Resultado preliminar de apoyo a la interpretación. Requiere revisión, validación y firma del médico radiólogo."
+    return (
+        "1. Impresión preliminar pendiente de revisión por médico radiólogo.\n"
+        "2. Correlacionar los hallazgos radiográficos con el cuadro clínico y estudios complementarios.\n"
+        "3. La salida de IA no confirma ni descarta una patología por sí sola."
+    )
 
 
 def generar_recomendaciones(resultado_cnn):
-    return "Conducta y seguimiento según revisión profesional y contexto clínico."
+    return (
+        "Conducta según criterio del médico tratante y radiólogo. Considerar hemograma u otros estudios "
+        "si el cuadro clínico es compatible con infección. Valorar tomografía de tórax ante dudas diagnósticas, "
+        "discordancia clínico-radiológica o sospecha de complicaciones."
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -102,6 +144,11 @@ class GenerarInformeView(APIView):
                 {"error": "El estudio no tiene imágenes asociadas."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        if not imagen.apta_para_cnn or imagen.clasificacion_imagen != "chest_xray":
+            return Response(
+                {"error": "Solo los estudios de tórax analizados por la CNN pueden generar este informe."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         try:
             resultado = ResultadoCNN.objects.get(imagen=imagen)
@@ -114,7 +161,7 @@ class GenerarInformeView(APIView):
         tipo_proyeccion = imagen.tipo_proyeccion or "PA"
         calidad = "adecuada" if imagen.es_nitida else "limitada por borrosidad"
 
-        informe, created = InformePreliminar.objects.get_or_create(estudio=estudio)
+        informe, created = InformePreliminar.objects.get_or_create(estudio=estudio, defaults={"imagen_origen": imagen})
         if not created:
             return Response(InformePreliminarSerializer(informe, context={"request": request}).data)
 
@@ -123,6 +170,7 @@ class GenerarInformeView(APIView):
             f"de panel plano. Calidad técnica {calidad}."
         )
         informe.hallazgos = generar_texto_hallazgos(resultado, tipo_proyeccion)
+        informe.correlacion_clinica = generar_correlacion_clinica()
         informe.impresion = generar_impresion(resultado)
         informe.recomendaciones = generar_recomendaciones(resultado)
         if getattr(request.user, "rol", None) == "medico" and informe.medico is None:
@@ -435,6 +483,7 @@ class DescargarInformeDICOMSRView(APIView):
             children=[
                 self._text_item("121006", "DCM", "Clinical History", f"Radiografía de tórax rutinaria. Centro: Neo Rayos X Digital, La Paz, Bolivia."),
                 self._text_item("121007", "DCM", "Reason for Exam", "Control radiológico / Sintomatología respiratoria"),
+                self._text_item("121011", "DCM", "Clinical Correlation", informe.correlacion_clinica or "No registrada."),
             ]
         )
         root.ContentSequence.append(clinical_context)
@@ -444,7 +493,7 @@ class DescargarInformeDICOMSRView(APIView):
             "121008", "DCM", "Technique",
             children=[
                 self._text_item("121009", "DCM", "Technique Description", informe.tecnica),
-                self._text_item("121010", "DCM", "Image Quality", "Adecuada" if getattr(informe.estudio.imagenes.first(), 'es_nitida', True) else "Limitada por borrosidad"),
+                self._text_item("121010", "DCM", "Image Quality", "Adecuada" if getattr(informe.imagen_origen or informe.estudio.imagenes.first(), 'es_nitida', False) else "Limitada o no registrada"),
             ]
         )
         root.ContentSequence.append(technique)

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { CheckCircle, AlertTriangle } from 'lucide-react'
 import Spinner from '../ui/Spinner'
@@ -45,12 +45,16 @@ const VISTAS = [
 export default function VisorImagen({
   imagenUrl, gradCAM, gradCAMCargando, gradCAMError, esNitida, varianza,
   patologias, patologiaSeleccionada, onPatologiaChange,
+  analysisEnabled = true, altText = 'Radiografía de tórax',
 }) {
   const [vista, setVista] = useState('original')
   const [failedSource, setFailedSource] = useState(null)
+  const [zoom, setZoom] = useState(1)
+  const [offset, setOffset] = useState({ x: 0, y: 0 })
+  const drag = useRef(null)
 
   // Mientras GradCAM carga, muestra imagen original como fondo (nunca placeholder vacío)
-  const imgSrc =
+  const imgSrc = !analysisEnabled ? imagenUrl :
     vista === 'overlay' ? (gradCAM?.overlay || imagenUrl) :
     vista === 'calor'   ? (gradCAM?.solo_calor || imagenUrl) :
     imagenUrl
@@ -68,11 +72,20 @@ export default function VisorImagen({
   const patologiasSignificativas = patologias
     ? Object.entries(patologias).filter(([, p]) => p > 0.4)
     : []
+  const patologiaPredeterminada = patologias
+    ? Object.entries(patologias).sort((a, b) => b[1] - a[1]).map(([nombre]) => PATOLOGIAS_EN[nombre]).find(Boolean)
+    : null
+
+  const solicitarMapa = () => {
+    if (!patologiaPredeterminada || gradCAMCargando) return
+    setVista('overlay')
+    onPatologiaChange?.(patologiaPredeterminada)
+  }
 
   return (
     <div className="flex flex-col h-full">
       {/* Toggle de vista */}
-      <div className="flex gap-1 p-1 bg-surface/50 rounded-xl mb-3">
+      {analysisEnabled && <div className="flex gap-1 p-1 bg-surface/50 rounded-xl mb-3">
         {VISTAS.map((v) => (
           <button
             key={v.id}
@@ -90,10 +103,19 @@ export default function VisorImagen({
             {v.label}
           </button>
         ))}
-      </div>
+      </div>}
 
-      {/* Imagen */}
-      <div className="relative rounded-xl overflow-hidden bg-scan-bg border border-white/10 flex-1 flex items-center justify-center min-h-[360px]">
+      <div className="flex items-center justify-end gap-3 mb-3 text-xs text-white">
+        <span>Zoom</span>
+        <input aria-label="Zoom de radiografía" type="range" min="1" max="4" step="0.25" value={zoom} onChange={(e) => { setZoom(Number(e.target.value)); setOffset({ x: 0, y: 0 }) }} className="w-24" />
+        <span>{Math.round(zoom * 100)}%</span>
+        <button type="button" className="underline" onClick={() => { setZoom(1); setOffset({ x: 0, y: 0 }) }}>Restablecer</button>
+      </div>
+      <div className="relative rounded-xl overflow-hidden bg-scan-bg border border-white/10 flex-1 flex items-center justify-center min-h-[360px]"
+        style={{ touchAction: zoom > 1 ? 'none' : 'auto', cursor: zoom > 1 ? 'grab' : 'default' }}
+        onPointerDown={(event) => { if (zoom <= 1) return; drag.current = { x: event.clientX - offset.x, y: event.clientY - offset.y }; event.currentTarget.setPointerCapture(event.pointerId) }}
+        onPointerMove={(event) => { if (!drag.current) return; const bounds = event.currentTarget.getBoundingClientRect(); const limitX = bounds.width * (zoom - 1) / 2; const limitY = bounds.height * (zoom - 1) / 2; setOffset({ x: Math.max(-limitX, Math.min(limitX, event.clientX - drag.current.x)), y: Math.max(-limitY, Math.min(limitY, event.clientY - drag.current.y)) }) }}
+        onPointerUp={() => { drag.current = null }} onPointerCancel={() => { drag.current = null }}>
         {mostrarPlaceholder ? (
           <PlaceholderRadiografia />
         ) : (
@@ -101,10 +123,11 @@ export default function VisorImagen({
             <motion.img
               key={imgSrc}
               src={privateSrc}
-              alt="Radiografía de tórax"
+              alt={altText}
+              draggable={false}
               onError={() => setFailedSource(privateSrc)}
               className="w-full h-full object-contain max-h-[420px]"
-              style={{ filter: vista === 'original' ? 'brightness(1.1) contrast(1.05)' : 'none' }}
+              style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})` }}
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -115,7 +138,7 @@ export default function VisorImagen({
 
         {/* Spinner mientras se calcula Grad-CAM (puede tardar ~15s en CPU) */}
         {gradCAMCargando && vista !== 'original' && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-scan-bg/75">
+          <div role="status" className="absolute bottom-3 left-3 flex items-center gap-3 rounded-lg p-3 bg-scan-bg/85">
             <Spinner size="xl" color="teal" />
             <p className="font-mono text-xs text-teal-med/80 animate-pulse">
               Calculando mapa de calor…
@@ -148,6 +171,16 @@ export default function VisorImagen({
         )}
       </div>
 
+      {analysisEnabled && !gradCAM && !gradCAMCargando && patologiaPredeterminada && (
+        <button
+          type="button"
+          onClick={solicitarMapa}
+          className="mt-3 rounded-lg border border-teal-med/35 bg-teal-med/10 px-3 py-2 text-xs font-semibold text-teal-med transition-colors hover:bg-teal-med/20"
+        >
+          Generar mapa de calor de la patología principal
+        </button>
+      )}
+
       {/* Leyenda heatmap */}
       {vista !== 'original' && (
         <motion.div
@@ -163,13 +196,13 @@ export default function VisorImagen({
             background: 'linear-gradient(to right, #000080, #0000ff, #00ffff, #00ff00, #ffff00, #ff8000, #ff0000)'
           }} />
           <p className="font-body text-white/40 text-[10px] mt-2 text-center">
-            Las zonas cálidas (rojo/naranja) indican regiones donde la red neuronal detectó características patológicas
+            Las zonas cálidas muestran qué regiones influyeron en la puntuación. El mapa usa el recorte central de la CNN; no delimita una lesión.
           </p>
         </motion.div>
       )}
 
       {/* Pills de patología para seleccionar Grad-CAM */}
-      {patologiasSignificativas.length > 0 && (
+      {analysisEnabled && patologiasSignificativas.length > 0 && (
         <div className="mt-3">
           <p className="font-body text-white/50 text-xs mb-2">Ver Grad-CAM por patología:</p>
           <div className="flex flex-wrap gap-1.5">
@@ -179,6 +212,7 @@ export default function VisorImagen({
               return (
                 <button
                   key={nombre}
+                  disabled={gradCAMCargando || !englishKey}
                   onClick={() => { onPatologiaChange(englishKey); setVista('overlay') }}
                   className={`px-2.5 py-1 rounded-full text-[11px] font-mono font-medium cursor-pointer transition-all
                     ${activa

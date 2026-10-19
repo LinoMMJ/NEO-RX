@@ -1,10 +1,10 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { AlertTriangle } from 'lucide-react'
+import { AlertTriangle, Archive, CheckCircle2, ShieldX } from 'lucide-react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
-import { uploadDicom, getGradCAM, obtenerEstadoTarea } from '../api/estudios'
-import { createEstudio, getPaciente } from '../api/pacientes'
+import { uploadDicom, obtenerEstadoTarea, previsualizarDicom } from '../api/estudios'
+import { getPaciente } from '../api/pacientes'
 import { useToast } from '../context/useToast'
 
 import ZonaUpload from '../components/scan/ZonaUpload'
@@ -14,23 +14,24 @@ import BuscadorPaciente from '../components/scan/BuscadorPaciente'
 import ProyeccionBadge from '../components/scan/ProyeccionBadge'
 import Button from '../components/ui/Button'
 import useObjectUrl from '../hooks/useObjectUrl'
+import useGradCAM from '../hooks/useGradCAM'
 
-// Reverse map español → inglés para Grad-CAM
-const ES_A_EN = {
-  'Neumonía':             'Pneumonia',
-  'Consolidación':        'Consolidation',
-  'Infiltrado pulmonar':  'Infiltration',
-  'Opacidad pulmonar':    'Lung Opacity',
-  'Lesión pulmonar':      'Lung Lesion',
-  'Derrame pleural':      'Effusion',
-  'Neumotórax':           'Pneumothorax',
-  'Engrosamiento pleural':'Pleural_Thickening',
-  'Atelectasia':          'Atelectasis',
-  'Enfisema':             'Emphysema',
-  'Fibrosis pulmonar':    'Fibrosis',
-  'Edema pulmonar':       'Edema',
-  'Nódulo pulmonar':      'Nodule',
-  'Masa pulmonar':        'Mass',
+const normalizarResultado = (data) => {
+  const raw = data?.patologias
+  if (!raw || !Array.isArray(raw.hallazgos)) return data
+  const patologias = Object.fromEntries(
+    raw.hallazgos
+      .filter((item) => item && Number.isFinite(Number(item.probabilidad_estimada)))
+      .map((item) => [item.etiqueta, Number(item.probabilidad_estimada)])
+  )
+  return {
+    ...data,
+    patologias,
+    modelo: data.modelo || raw.modelo,
+    es_fine_tuned: data.es_fine_tuned ?? raw.es_fine_tuned,
+    thresholds: data.thresholds || raw.thresholds,
+    nota_modelo: data.nota_modelo || raw.nota,
+  }
 }
 
 export default function EscaneoPage() {
@@ -38,8 +39,10 @@ export default function EscaneoPage() {
   const [query] = useSearchParams()
   const pacienteId = query.get('paciente')
   const toast = useToast()
-  const [fase, setFase] = useState('upload')   // upload | procesando | resultados | borrosidad
+  const [fase, setFase] = useState('upload')   // upload | procesando | resultados | borrosidad | guardada | rechazada
   const [archivo, setArchivo] = useState(null)
+  const [dicomPreview, setDicomPreview] = useState(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
 
   const [paciente, setPaciente] = useState(null)
   useEffect(() => {if(!pacienteId)return;let active=true;getPaciente(pacienteId).then(({data})=>{if(active)setPaciente(data)}).catch(()=>{});return ()=>{active=false}},[pacienteId])
@@ -48,12 +51,9 @@ export default function EscaneoPage() {
 
   // Resultado del análisis
   const [resultado, setResultado] = useState(null)
-  const [gradCAM, setGradCAM] = useState(null)
-  const [gradCAMCargando, setGradCAMCargando] = useState(false)
-  const [gradCAMError, setGradCAMError] = useState(false)
-  const [patologiaSeleccionada, setPatologiaSeleccionada] = useState(null)
+  const maps = useGradCAM()
+  const { data: gradCAM, loading: gradCAMCargando, error: gradCAMError, pathology: patologiaSeleccionada } = maps
   const [estudioId, setEstudioId] = useState(null)
-  const draftStudy = useRef(null)
   const [progreso, setProgreso] = useState(0)
 
   // Animación de progreso simulado — llega a 85% máx y espera respuesta del backend
@@ -72,23 +72,30 @@ export default function EscaneoPage() {
 
   const pacienteValido = !!paciente
 
-  // Imagen preview para AnimacionCNN
-  const imagenPreviewUrl = useObjectUrl(archivo)
+  // El navegador no puede dibujar DICOM directamente. Para DICOM se usa la
+  // miniatura segura devuelta por el backend; PNG/JPG/WebP siguen usando URL local.
+  const objectPreviewUrl = useObjectUrl(archivo)
+  const archivoEsDicom = Boolean(archivo?.name?.toLowerCase().match(/\.(dcm|dicom)$/))
+  const imagenPreviewUrl = archivoEsDicom ? dicomPreview : objectPreviewUrl
 
-  // Carga Grad-CAM (timeout 2min configurado en axios); si falla marca error sin romper UI
-  const cargarGradCAM = (imagenId, englishName) => {
-    setPatologiaSeleccionada(englishName)
-    setGradCAM(null)
-    setGradCAMCargando(true)
-    setGradCAMError(false)
-    getGradCAM(imagenId, englishName)
-      .then(({ data: gc }) => { setGradCAM(gc); setGradCAMError(false) })
-      .catch(() => { setGradCAM(null); setGradCAMError(true) })
-      .finally(() => setGradCAMCargando(false))
+  const handleArchivo = async (nuevoArchivo) => {
+    setArchivo(nuevoArchivo)
+    setDicomPreview(null)
+    if (!nuevoArchivo || !nuevoArchivo.name?.toLowerCase().match(/\.(dcm|dicom)$/)) return
+
+    setPreviewLoading(true)
+    try {
+      const { data } = await previsualizarDicom(nuevoArchivo)
+      setDicomPreview(data.preview_url)
+    } catch {
+      toast.error('No se pudo crear la vista previa DICOM. Puedes elegir otro archivo.')
+    } finally {
+      setPreviewLoading(false)
+    }
   }
 
-  const esperarResultadoTarea = async (taskId, imagenId) => {
-    const maxIntentos = 180  // 3 minutos máx (180 × 1s)
+  const esperarResultadoTarea = async (taskId, savedStudyId) => {
+    const maxIntentos = 90
     for (let i = 0; i < maxIntentos; i++) {
       await new Promise(r => setTimeout(r, 1000))
       try {
@@ -100,15 +107,22 @@ export default function EscaneoPage() {
           return
         }
 
+        if (r.status === 'STORED') {
+          setProgreso(100)
+          if (r.estudio_id) setEstudioId(r.estudio_id)
+          setResultado(r)
+          setFase('guardada')
+          return
+        }
+
         if (r.status === 'SUCCESS') {
           setProgreso(100)
+          if (r.estudio_id) setEstudioId(r.estudio_id)
           if (r.proyeccion) setProyeccion(r.proyeccion)
-          setResultado(r)
+          const resultadoNormalizado = normalizarResultado(r)
+          setResultado(resultadoNormalizado)
           setFase('resultados')
           if (r.advertencia_proyeccion) toast.info(r.advertencia_proyeccion)
-          const topPatologia = r.patologias ? Object.keys(r.patologias)[0] : null
-          const topEnglish = topPatologia ? ES_A_EN[topPatologia] : null
-          if (imagenId && topEnglish) cargarGradCAM(imagenId, topEnglish)
           return
         }
         // PENDING / STARTED: seguir esperando (la barra de progreso sigue animando sola)
@@ -116,41 +130,30 @@ export default function EscaneoPage() {
         // error de red transitorio — seguir intentando
       }
     }
-    toast.error('El análisis tardó demasiado. Intenta de nuevo.')
-    setFase('upload')
+    toast.info('El estudio está guardado y continúa pendiente. Puedes consultar su estado sin volver a subir la imagen.')
+    navigate(`/analisis/${savedStudyId}`)
   }
 
   const handleIniciarAnalisis = async () => {
     if (!archivo || !pacienteValido) return
     setProgreso(0)
+    setResultado(null)
+    maps.reset()
     setFase('procesando')
     setProgreso(5)
 
     try {
-      // 1. Crear estudio (la proyección la detecta el backend tras el upload)
-      let currentId = draftStudy.current?.patientId === paciente.id ? draftStudy.current.id : null
-      if (!currentId) {
-        const { data: est } = await createEstudio({
-          paciente: paciente.id,
-          fecha: new Date().toISOString().split('T')[0],
-          tipo_estudio: 'Radiografía de Tórax',
-          observaciones,
-        })
-        currentId = est.id
-        draftStudy.current = { id: currentId, patientId: paciente.id }
-      }
-      setEstudioId(currentId)
-
-      // 2. Upload DICOM/PNG + análisis CNN
       const formData = new FormData()
       formData.append('archivo', archivo)
-      formData.append('estudio_id', currentId)
+      formData.append('paciente_id', paciente.id)
+      formData.append('observaciones', observaciones)
 
-      const { data } = await uploadDicom(formData, (e) => {
-        if (e.total) setProgreso(5 + Math.round((e.loaded / e.total) * 15))
+      const { data } = await uploadDicom(formData, (event) => {
+        if (event.total) setProgreso(5 + Math.round((event.loaded / event.total) * 15))
       })
 
-      // Borrosidad detectada — respuesta inmediata, sin CNN
+      if (data.estudio_id) setEstudioId(data.estudio_id)
+
       if (data.alerta === 'borrosidad') {
         setProgreso(100)
         if (data.proyeccion) setProyeccion(data.proyeccion)
@@ -159,41 +162,53 @@ export default function EscaneoPage() {
         return
       }
 
-      // Resultado directo (sin Redis/Celery — inferencia síncrona en backend)
-      if (data.status === 'SUCCESS') {
+      if (data.status === 'STORED') {
         setProgreso(100)
-        if (data.proyeccion) setProyeccion(data.proyeccion)
         setResultado(data)
-        setFase('resultados')
-        const topPatologia = data.patologias ? Object.keys(data.patologias)[0] : null
-        const topEnglish = topPatologia ? ES_A_EN[topPatologia] : null
-        if (data.imagen_id && topEnglish) cargarGradCAM(data.imagen_id, topEnglish)
+        setFase('guardada')
         return
       }
 
-      // 202 Accepted — Celery procesando en background
-      if (data.status === 'procesando') {
+      if (data.status === 'SUCCESS') {
+        setProgreso(100)
         if (data.proyeccion) setProyeccion(data.proyeccion)
-        await esperarResultadoTarea(data.task_id, data.imagen_id)
+        const resultadoNormalizado = normalizarResultado(data)
+        setResultado(resultadoNormalizado)
+        setFase('resultados')
         return
       }
-    } catch (e) {
-      const msg = e.response?.data?.error
-      if (e.response) toast.error(msg || 'No se pudo completar el análisis. Intenta nuevamente.')
-      else toast.red()
+
+      if (data.status === 'procesando') {
+        if (data.proyeccion) setProyeccion(data.proyeccion)
+        await esperarResultadoTarea(data.task_id, data.estudio_id)
+      }
+    } catch (error) {
+      const response = error.response?.data
+      if (response?.status === 'REJECTED' || response?.codigo === 'no_radiografia') {
+        setResultado(response)
+        setFase('rechazada')
+        return
+      }
+      const details = Array.isArray(response?.detalles) ? response.detalles.join(' ') : ''
+      const message = [response?.error, details].filter(Boolean).join(': ')
+      if (error.response) toast.error(message || 'No se pudo validar la radiografía. Intenta nuevamente.')
+      else toast.error('No se pudo conectar con el servidor. Verifica que el backend esté iniciado.')
+      if (response?.estudio_id) {
+        navigate(`/analisis/${response.estudio_id}`)
+        return
+      }
       setFase('upload')
     }
   }
 
   const handlePatologiaChange = (englishName) => {
     if (!resultado?.imagen_id) return
-    cargarGradCAM(resultado.imagen_id, englishName)
+    maps.load(resultado.imagen_id, englishName)
   }
 
-  const reiniciar = ({ reuse = false } = {}) => {
-    if (!reuse) draftStudy.current = null
-    setFase('upload'); setArchivo(null); setResultado(null)
-    setGradCAM(null); setGradCAMError(false); setProyeccion(null)
+  const reiniciar = () => {
+    setFase('upload'); setArchivo(null); setDicomPreview(null); setResultado(null)
+    maps.reset(); setProyeccion(null)
   }
 
   return (
@@ -236,7 +251,7 @@ export default function EscaneoPage() {
                     value={observaciones}
                     onChange={(e) => setObservaciones(e.target.value)}
                     rows={2}
-                    placeholder="Anotaciones clínicas adicionales..."
+                    placeholder="Anotaciones clínicas adicionales…"
                     className="w-full px-3 py-2 rounded-lg border border-slate-200 font-body text-sm resize-none
                       focus:outline-none focus:ring-2 focus:ring-teal-med/40"
                   />
@@ -246,7 +261,12 @@ export default function EscaneoPage() {
 
             {/* Zona de upload */}
             <div className="flex flex-col gap-4">
-              <ZonaUpload archivo={archivo} onArchivo={setArchivo} />
+              <ZonaUpload
+                archivo={archivo}
+                onArchivo={handleArchivo}
+                previewUrl={archivoEsDicom ? dicomPreview : objectPreviewUrl}
+                previewLoading={previewLoading}
+              />
 
               <Button
                 variant="navy"
@@ -254,7 +274,7 @@ export default function EscaneoPage() {
                 disabled={!archivo || !pacienteValido}
                 onClick={handleIniciarAnalisis}
               >
-                Analizar radiografía
+                Validar y continuar
               </Button>
 
               {(!archivo || !pacienteValido) && (
@@ -278,6 +298,70 @@ export default function EscaneoPage() {
           </motion.div>
         )}
 
+        {/* ═══ FASE: RADIOGRAFÍA GUARDADA SIN CNN ═══ */}
+        {fase === 'guardada' && resultado && (
+          <motion.section
+            key="guardada"
+            initial={{ opacity: 0, y: 16, filter: 'blur(6px)' }}
+            animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+            className="mx-auto max-w-2xl overflow-hidden rounded-2xl border border-sky-300/40 bg-white shadow-xl shadow-sky-950/5"
+            aria-live="polite"
+          >
+            <div className="flex items-start gap-4 bg-sky-50 px-6 py-5">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-sky-600 text-white shadow-lg shadow-sky-600/20">
+                <Archive className="h-6 w-6" aria-hidden="true" />
+              </div>
+              <div className="min-w-0">
+                <h2 className="font-heading text-xl font-bold text-navy">Radiografía guardada</h2>
+                <p className="mt-1 font-body text-sm leading-6 text-slate-600">
+                  Se vinculó al expediente del paciente. No se ejecutó la CNN porque el modelo está validado únicamente para tórax.
+                </p>
+              </div>
+            </div>
+            <dl className="grid gap-4 px-6 py-5 sm:grid-cols-2">
+              <div><dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Región identificada</dt><dd className="mt-1 font-semibold text-navy">{resultado.clasificacion?.anatomical_region || 'No determinada'}</dd></div>
+              <div><dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Estado</dt><dd className="mt-1 flex items-center gap-2 font-semibold text-sky-700"><CheckCircle2 className="h-4 w-4" /> Almacenada sin análisis CNN</dd></div>
+              <div className="sm:col-span-2"><dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Motivo</dt><dd className="mt-1 text-sm text-slate-600">{resultado.clasificacion?.reason || resultado.mensaje}</dd></div>
+            </dl>
+            <div className="flex flex-wrap gap-3 border-t border-slate-100 px-6 py-4">
+              <Button variant="primary" onClick={() => navigate('/estudios')}>Ver estudios</Button>
+              <Button variant="secondary" onClick={reiniciar}>Cargar otra radiografía</Button>
+            </div>
+          </motion.section>
+        )}
+
+        {/* ═══ FASE: ARCHIVO RECHAZADO ═══ */}
+        {fase === 'rechazada' && resultado && (
+          <motion.section
+            key="rechazada"
+            initial={{ opacity: 0, y: 16, filter: 'blur(6px)' }}
+            animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+            className="mx-auto max-w-2xl overflow-hidden rounded-2xl border border-rose-300/50 bg-white shadow-xl shadow-rose-950/5"
+            aria-live="assertive"
+          >
+            <div className="flex items-start gap-4 bg-rose-50 px-6 py-5">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-rose-600 text-white shadow-lg shadow-rose-600/20">
+                <ShieldX className="h-6 w-6" aria-hidden="true" />
+              </div>
+              <div className="min-w-0">
+                <h2 className="font-heading text-xl font-bold text-rose-950">Archivo no admitido</h2>
+                <p className="mt-1 font-body text-sm leading-6 text-rose-900/75">
+                  {resultado.error || 'La imagen no corresponde a una radiografía válida.'}
+                </p>
+              </div>
+            </div>
+            <div className="space-y-3 px-6 py-5 text-sm text-slate-600">
+              <p>{resultado.clasificacion?.reason}</p>
+              <p className="rounded-xl bg-slate-50 px-4 py-3 font-medium text-slate-700">
+                No se creó ningún estudio ni se almacenó el archivo. Usa una radiografía DICOM, PNG o JPG legible.
+              </p>
+            </div>
+            <div className="border-t border-slate-100 px-6 py-4">
+              <Button variant="secondary" onClick={reiniciar}>Seleccionar otro archivo</Button>
+            </div>
+          </motion.section>
+        )}
+
         {/* ═══ FASE: BORROSIDAD ═══ */}
         {fase === 'borrosidad' && (
           <motion.div
@@ -298,7 +382,7 @@ export default function EscaneoPage() {
                 Esta imagen no es apta para diagnóstico por IA.
                 Solicite una nueva toma con menor movimiento del paciente.
               </p>
-              <Button variant="secondary" onClick={() => reiniciar({ reuse: true })}>
+              <Button variant="secondary" onClick={reiniciar}>
                 Intentar con nueva imagen
               </Button>
             </div>
@@ -319,6 +403,7 @@ export default function EscaneoPage() {
               gradCAMCargando={gradCAMCargando}
               gradCAMError={gradCAMError}
               estudioId={estudioId}
+              informeId={resultado?.informe_id}
               patologiaSeleccionada={patologiaSeleccionada}
               onPatologiaChange={handlePatologiaChange}
               onInformeGenerado={(inf) => navigate(`/informes/${inf.id}`)}

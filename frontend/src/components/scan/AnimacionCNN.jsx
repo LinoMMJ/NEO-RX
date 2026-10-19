@@ -1,39 +1,24 @@
-/**
- * AnimacionCNN — Visualización de la arquitectura ResNet-50 en tiempo real.
- *
- * Muestra cómo la imagen atraviesa las capas del modelo para que el tribunal
- * de tesis pueda ver que la IA es real y no una heurística simple.
- *
- * Arquitectura real de torchxrayvision ResNet-50:
- *  - Conv1: 64 filtros 7×7, stride 2 → feature maps 64ch @ 256×256
- *  - Layer1 (3 bloques residuales): 256ch @ 64×64
- *  - Layer2 (4 bloques residuales): 512ch @ 32×32
- *  - Layer3 (6 bloques residuales): 1024ch @ 16×16
- *  - Layer4 (3 bloques residuales): 2048ch @ 8×8  ← Grad-CAM hook aquí
- *  - GAP + FC: 18 probabilidades de patologías
- */
+/** Visualización neutral del flujo CNN; el modelo real se informa al terminar. */
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 
-// Capas reales del ResNet-50 de torchxrayvision
 const CAPAS = [
-  { id: 'input',  name: 'INPUT',   ch: '1 ch',     desc: 'Imagen de entrada',              size: '512×512',  color: '#64748b' },
-  { id: 'conv1',  name: 'CONV1',   ch: '64 ch',    desc: 'Extracción de bordes',           size: '256×256',  color: '#0EA5E9' },
-  { id: 'layer1', name: 'LAYER1',  ch: '256 ch',   desc: 'Detección de texturas',          size: '64×64',    color: '#38bdf8' },
-  { id: 'layer2', name: 'LAYER2',  ch: '512 ch',   desc: 'Reconocimiento de patrones',     size: '32×32',    color: '#0EA5E9' },
-  { id: 'layer3', name: 'LAYER3',  ch: '1024 ch',  desc: 'Características complejas',      size: '16×16',    color: '#38bdf8' },
-  { id: 'layer4', name: 'LAYER4',  ch: '2048 ch',  desc: 'Características de alto nivel',  size: '8×8',      color: '#f59e0b', gradcam: true },
-  { id: 'fc',     name: 'FC 18',   ch: '18 sal.',  desc: 'Clasificación médica',           size: '1×1',      color: '#10b981' },
+  { id: 'input', name: 'ENTRADA', ch: '1 canal', desc: 'Radiografía normalizada', size: 'imagen', color: '#64748b' },
+  { id: 'features1', name: 'RASGOS 1', ch: 'bordes', desc: 'Extracción de bordes y contraste', size: 'mapas', color: '#0EA5E9' },
+  { id: 'features2', name: 'RASGOS 2', ch: 'texturas', desc: 'Detección de patrones pulmonares', size: 'mapas', color: '#38bdf8' },
+  { id: 'features3', name: 'RASGOS 3', ch: 'formas', desc: 'Combinación de características', size: 'mapas', color: '#0EA5E9' },
+  { id: 'final', name: 'MAPA FINAL', ch: 'activación', desc: 'Regiones relevantes para el modelo', size: 'mapas', color: '#f59e0b', gradcam: true },
+  { id: 'output', name: 'SALIDA', ch: 'puntajes', desc: 'Puntuaciones por hallazgo', size: 'vector', color: '#10b981' },
 ]
 
 // Textos de estado que cambian progresivamente durante el análisis
 const ESTADOS = [
-  { t: 400,  msg: 'Leyendo archivo DICOM...' },
-  { t: 1400, msg: 'Validando nitidez técnica (varianza de Laplaciano)...' },
-  { t: 2600, msg: 'Normalizando imagen al rango [-1024, 1024]...' },
-  { t: 3800, msg: 'Extrayendo características con ResNet-50...' },
-  { t: 5200, msg: 'Aplicando 50 capas de aprendizaje residual...' },
-  { t: 6800, msg: 'Calculando probabilidades para 13 patologías neumológicas...' },
+  { t: 400,  msg: 'Leyendo archivo DICOM…' },
+  { t: 1400, msg: 'Validando nitidez técnica (varianza de Laplaciano)…' },
+  { t: 2600, msg: 'Normalizando imagen al rango [-1024, 1024]…' },
+  { t: 3800, msg: 'Extrayendo características con la red convolucional…' },
+  { t: 5200, msg: 'Combinando patrones radiográficos…' },
+  { t: 6800, msg: 'Calculando probabilidades para 12 patologías neumológicas…' },
 ]
 
 export default function AnimacionCNN({ imagenPreview, progreso = 0, completado = false }) {
@@ -59,10 +44,10 @@ export default function AnimacionCNN({ imagenPreview, progreso = 0, completado =
     return () => timers.forEach(clearTimeout)
   }, [])
 
-  // Mensaje de paciencia si la inferencia tarda más de 30s (primera carga del modelo)
+  // Si tarda, conservar la solicitud en curso y explicar que no debe reenviarse.
   useEffect(() => {
     const timer = setTimeout(() => {
-      setMensajeExtra('Primera carga del modelo (~2-3 min en CPU). Espera por favor...')
+      setMensajeExtra('El análisis continúa en el servidor. No recargues ni envíes el estudio otra vez.')
     }, 30000)
     return () => clearTimeout(timer)
   }, [])
@@ -77,7 +62,7 @@ export default function AnimacionCNN({ imagenPreview, progreso = 0, completado =
           className="w-3 h-3 rounded-full bg-teal-med"
         />
         <h2 className="font-heading font-bold text-white text-xl tracking-wide">
-          Analizando con ResNet-50
+          Analizando radiografía con CNN
         </h2>
       </div>
 
@@ -205,7 +190,7 @@ export default function AnimacionCNN({ imagenPreview, progreso = 0, completado =
 
       {/* Nota técnica para la tesis */}
       <p className="mt-6 font-mono text-[10px] text-white/25 text-center">
-        ResNet-50 · 25.5M parámetros · Entrenado: PadChest + NIH ChestX-ray14 + RSNA + SIIM · Resolución: 512×512
+        Modelo torácico preentrenado · El detalle técnico real se mostrará con el resultado
       </p>
     </div>
   )

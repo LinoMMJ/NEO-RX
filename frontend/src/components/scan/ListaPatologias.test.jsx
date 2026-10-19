@@ -1,80 +1,43 @@
-import { render, screen, fireEvent } from '@testing-library/react'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { render, screen, within } from '@testing-library/react'
+import { describe, it, expect } from 'vitest'
 import ListaPatologias from './ListaPatologias'
+import { partitionFindings } from '../../utils/modelFindings'
 
-vi.mock('../../api', () => ({ api: { get: vi.fn(() => new Promise(() => {})) } }))
+const scores = { 'Fibrosis pulmonar': 0.78, 'Nódulo pulmonar': 0.71, 'Enfisema': 0.61 }
+const findings = Object.keys(scores).map((etiqueta, index) => ({ etiqueta, threshold_usado: [0.5, 0.8, 0.7][index] }))
 
 describe('ListaPatologias', () => {
-  const mockPatologias = {
-    'Neumonía': 0.85,
-    'Consolidación': 0.42,
-    'Derrame pleural': 0.15,
-    'Atelectasia': 0.05,
-  }
-
-  beforeEach(() => {
-    vi.clearAllMocks()
+  it('destaca solo señales que superan su umbral y conserva el resto en detalle', () => {
+    render(<ListaPatologias patologias={scores} hallazgos={findings} />)
+    const candidates = screen.getByRole('list', { name: 'Señales sobre umbral' })
+    expect(within(candidates).getByText('Fibrosis pulmonar')).toBeInTheDocument()
+    expect(within(candidates).queryByText('Nódulo pulmonar')).not.toBeInTheDocument()
+    expect(screen.getByText('Nódulo pulmonar')).not.toBeVisible()
+    expect(screen.getByText('Ver otras puntuaciones (2)')).toBeInTheDocument()
+    expect(screen.getByText('78.0/100')).toBeInTheDocument()
+    expect(screen.queryByText('78.0%')).not.toBeInTheDocument()
   })
-
-  it('renderiza la lista de patologías ordenada por probabilidad', () => {
-    render(<ListaPatologias patologias={mockPatologias} />)
-
-    expect(screen.getByText('Hallazgos detectados')).toBeInTheDocument()
-
-    // Verificar orden descendente
-    expect(screen.getByText('Neumonía').compareDocumentPosition(screen.getByText('Consolidación')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(screen.getByText('Neumonía')).toBeInTheDocument()
-    expect(screen.getByText('Consolidación')).toBeInTheDocument()
-    expect(screen.getByText('Derrame pleural')).toBeInTheDocument()
+  it('no inventa un ganador cuando varias clases superan su umbral', () => {
+    render(<ListaPatologias patologias={scores} hallazgos={findings.map((f) => ({...f, threshold_usado: 0.5}))} />)
+    expect(screen.getByText('3 señales superan sus umbrales')).toBeInTheDocument()
+    expect(screen.getByRole('note')).toHaveTextContent('no permite escoger un diagnóstico único')
   })
-
-  it('no muestra patologías por debajo del umbral (5%)', () => {
-    const patologiasConBajas = {
-      ...mockPatologias,
-      'Opacidad pulmonar': 0.03, // < 5%
-    }
-    render(<ListaPatologias patologias={patologiasConBajas} />)
-
-    expect(screen.queryByText('Opacidad pulmonar')).not.toBeInTheDocument()
+  it('no declara normalidad si ninguna clase supera su umbral', () => {
+    render(<ListaPatologias patologias={scores} hallazgos={findings.map((f) => ({...f, threshold_usado: 0.9}))} />)
+    expect(screen.getByText(/Ninguna señal supera su umbral/)).toHaveTextContent('no descarta enfermedad')
   })
-
-  it('muestra estado vacío cuando no hay patologías', () => {
+  it('no aplica umbrales inventados a resultados históricos', () => {
+    render(<ListaPatologias patologias={scores} />)
+    expect(screen.getByText(/Resultado histórico sin umbrales/)).toBeInTheDocument()
+    expect(screen.queryByRole('list', {name: 'Señales sobre umbral'})).not.toBeInTheDocument()
+  })
+  it('incluye igualdad de umbral y descarta scores no válidos', () => {
+    const result = partitionFindings({ A: 0.5, B: NaN, C: 2 }, [{ etiqueta: 'A', threshold_usado: 0.5 }])
+    expect(result.candidates.map((row) => row.name)).toEqual(['A'])
+    expect(result.rows).toHaveLength(1)
+  })
+  it('explica datos ausentes', () => {
     render(<ListaPatologias patologias={{}} />)
-    expect(screen.getByText('No se detectaron hallazgos')).toBeInTheDocument()
-    expect(screen.getByText('El modelo no identificó patologías por encima del umbral de mención (5%).')).toBeInTheDocument()
-  })
-
-  it('muestra badges correctos según nivel de probabilidad', () => {
-    render(<ListaPatologias patologias={mockPatologias} />)
-
-    // Neumonía 85% -> ALTO (CRÍTICO)
-    const neumoniaBadge = screen.getByText('Alto')
-    expect(neumoniaBadge).toBeInTheDocument()
-
-    // Consolidación 42% -> MODERADO
-    const consolidacionBadge = screen.getByText('Moderado')
-    expect(consolidacionBadge).toBeInTheDocument()
-
-    // Los valores 15% y 5% quedan por debajo del umbral leve (20%).
-    expect(screen.getAllByText('No significativo')).toHaveLength(2)
-  })
-
-  it('muestra porcentajes correctos', () => {
-    render(<ListaPatologias patologias={mockPatologias} />)
-
-    expect(screen.getByText('85%')).toBeInTheDocument()
-    expect(screen.getByText('42%')).toBeInTheDocument()
-    expect(screen.getByText('15%')).toBeInTheDocument()
-    expect(screen.getByText('5%')).toBeInTheDocument()
-  })
-
-  it('muestra tooltip al hacer hover', () => {
-    render(<ListaPatologias patologias={mockPatologias} />)
-
-    const neumonia = screen.getByText('Neumonía')
-    fireEvent.mouseEnter(neumonia)
-
-    expect(screen.getByText('Pneumonia')).toBeInTheDocument()
-    expect(screen.getByText('Infección bacteriana o viral del parénquima pulmonar con exudado alveolar')).toBeInTheDocument()
+    expect(screen.getByText(/No hay puntuaciones disponibles/)).toBeInTheDocument()
   })
 })

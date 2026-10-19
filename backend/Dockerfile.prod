@@ -22,7 +22,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Instalar dependencias Python
 COPY requirements.txt .
-RUN python -m venv /opt/venv && /opt/venv/bin/pip install -r requirements.txt
+# La imagen de producción no usa GPU. Instalar las ruedas CPU de PyTorch evita
+# descargar dependencias CUDA de varios GB durante cada construcción.
+RUN python -m venv /opt/venv \
+    && /opt/venv/bin/pip install --index-url https://download.pytorch.org/whl/cpu torch==2.12.0 torchvision==0.27.0 \
+    && sed -E '/^(torch|torchvision)==/d' requirements.txt > /tmp/requirements.no-torch.txt \
+    && /opt/venv/bin/pip install -r /tmp/requirements.no-torch.txt
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 2: Runtime (imagen final ligera)

@@ -26,6 +26,7 @@ from datetime import timedelta
 
 import hashlib
 import hmac
+import json
 import secrets
 from django.db import transaction
 from rest_framework_simplejwt.tokens import AccessToken
@@ -41,9 +42,21 @@ from neorx.models import log_audit
 User = get_user_model()
 
 
+def _login_identity_key(group, request):
+    """Stable, non-reversible rate-limit key for username/email attempts."""
+    try:
+        payload = json.loads(request.body or b"{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        payload = {}
+    identifier = str(payload.get("username", "")).strip().casefold()[:254]
+    digest = hmac.new(settings.SECRET_KEY.encode(), identifier.encode(), hashlib.sha256).hexdigest()
+    return digest
+
+
+@method_decorator(ratelimit(key=_login_identity_key, rate="10/h", block=True), name="post")
 @method_decorator(ratelimit(key="ip", rate="5/m", block=True), name="post")
 class CustomTokenObtainPairView(TokenObtainPairView):
-    """Login con rate limiting: 5 intentos por minuto por IP."""
+    """Login limitado por IP y por cuenta para frenar ataques automatizados."""
     serializer_class = CustomTokenObtainPairSerializer
 
     def post(self, request, *args, **kwargs):

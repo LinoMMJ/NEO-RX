@@ -72,7 +72,7 @@ def test_review_sign_immutable_and_no_regeneration(auth_medico, imagen_con_resul
     assert response.status_code == 200
     pk = response.data['id']; url = f'/api/informes/{pk}/'
     assert auth_medico.patch(url, {'estado': 'firmado'}).status_code == 400
-    assert auth_medico.patch(url, {'estado': 'revisado', 'hallazgos': 'Revisión profesional'}).status_code == 200
+    assert auth_medico.patch(url, {'estado': 'revisado', 'hallazgos': 'Revisión profesional', 'correlacion_clinica': 'Datos clínicos revisados.'}).status_code == 200
     assert auth_medico.patch(url, {'estado': 'firmado'}).status_code == 200
     assert auth_medico.patch(url, {'hallazgos': 'Manipulado'}).status_code == 400
     assert auth_medico.post('/api/informes/generar/', {'estudio_id': imagen_con_resultado.estudio_id}).data['hallazgos'] == 'Revisión profesional'
@@ -153,7 +153,9 @@ def test_dashboard_sqlite_empty_and_data(query, auth_medico, imagen_con_resultad
     assert auth_medico.get(url).status_code==200
     InformePreliminar.objects.create(estudio=imagen_con_resultado.estudio, estado='firmado',medico=medico_user,fecha_firmado=timezone.now())
     response=auth_medico.get(url); assert response.status_code==200
-    assert response.data['metricas_cnn']['estado']=='pendiente'
+    expected_status = 'sin_datos' if '2020' in query else 'operativo'
+    assert response.data['metricas_cnn']['estado'] == expected_status
+    assert response.data['metricas_cnn']['analisis_realizados'] == (0 if '2020' in query else 1)
     if not query:
         assert response.data['completitud']['completados']==1
         assert response.data['latencia_diagnostico']['muestras']==1
@@ -186,7 +188,7 @@ def dicom_bytes():
     meta.MediaStorageSOPClassUID=DigitalXRayImageStorageForPresentation;meta.MediaStorageSOPInstanceUID=generate_uid()
     ds=FileDataset(None, {}, file_meta=meta, preamble=b'\0'*128)
     ds.SOPClassUID=meta.MediaStorageSOPClassUID;ds.SOPInstanceUID=meta.MediaStorageSOPInstanceUID
-    ds.StudyInstanceUID=generate_uid();ds.Modality='DX';ds.PatientID='SYNTHETIC';ds.PatientName='Unit^Fixture'
+    ds.StudyInstanceUID=generate_uid();ds.Modality='DX';ds.BodyPartExamined='CHEST';ds.PatientID='SYNTHETIC';ds.PatientName='Unit^Fixture'
     ds.Rows=64;ds.Columns=64;ds.SamplesPerPixel=1;ds.PhotometricInterpretation='MONOCHROME2'
     ds.BitsAllocated=8;ds.BitsStored=8;ds.HighBit=7;ds.PixelRepresentation=0
     ds.PixelData=np.zeros((64,64),dtype=np.uint8).tobytes()
@@ -200,7 +202,10 @@ def test_valid_dicom_metadata():
 
 def test_reception_upload_repetition(auth_recepcionista, imagen_dicom, settings, tmp_path):
     settings.MEDIA_ROOT=tmp_path
-    response=auth_recepcionista.post('/api/estudios/upload/',{'estudio_id':imagen_dicom.estudio_id,'archivo':SimpleUploadedFile('valid.png',png_bytes())})
+    from estudios.classification import ImageSuitability
+    chest=ImageSuitability("chest_xray",True,True,"Torax",0.99,"test","Radiografia de torax.",{})
+    with patch('estudios.views.classify_medical_image',return_value=chest):
+        response=auth_recepcionista.post('/api/estudios/upload/',{'estudio_id':imagen_dicom.estudio_id,'archivo':SimpleUploadedFile('valid.png',png_bytes())})
     assert response.status_code==200 and response.data['alerta']=='borrosidad'
     imagen_dicom.estudio.refresh_from_db();assert imagen_dicom.estudio.estado=='requiere_repeticion'
     assert AuditLog.objects.filter(resource_type='estudio',action='validate').exists()
@@ -246,13 +251,35 @@ def test_dicom_upload_technical_quality(auth_recepcionista, imagen_dicom, settin
 def test_upload_dispatches_once(auth_recepcionista, imagen_dicom, settings, tmp_path):
     from types import SimpleNamespace
     settings.MEDIA_ROOT=tmp_path
-    with patch('estudios.views.calcular_borrosidad',return_value=(True,150)), patch('diagnostico.tasks.procesar_imagen_cnn.delay',return_value=SimpleNamespace(id='mock-task')) as delay:
+    settings.NEORX_INFERENCE_MODE='celery'
+    from estudios.classification import ImageSuitability
+    chest=ImageSuitability("chest_xray",True,True,"Torax",0.99,"test","Radiografia de torax.",{})
+    with patch('estudios.views.classify_medical_image',return_value=chest), \
+         patch('estudios.views.calcular_borrosidad',return_value=(True,150)), \
+         patch('diagnostico.tasks.procesar_imagen_cnn.apply_async',return_value=SimpleNamespace(id='mock-task')) as delay:
         response=auth_recepcionista.post('/api/estudios/upload/',{'estudio_id':imagen_dicom.estudio_id,
             'archivo':SimpleUploadedFile('valid.png',png_bytes())})
     assert response.status_code==202 and response.data['task_id']=='mock-task'
     assert delay.call_count==1
 
 
+def test_upload_inline_returns_result_without_celery(auth_recepcionista, imagen_dicom, settings, tmp_path):
+    settings.MEDIA_ROOT=tmp_path
+    settings.NEORX_INFERENCE_MODE='inline'
+    from estudios.classification import ImageSuitability
+    chest=ImageSuitability("chest_xray",True,True,"Torax",0.99,"test","Radiografia de torax.",{})
+    payload={'hallazgos':[{'etiqueta':'Neumonía','probabilidad_estimada':0.8}]}
+    with patch('estudios.views.classify_medical_image',return_value=chest), \
+         patch('estudios.views.calcular_borrosidad',return_value=(True,150)), \
+         patch('diagnostico.services.DetectorTorax.desde_png',return_value=payload) as predict, \
+         patch('diagnostico.tasks.procesar_imagen_cnn.apply_async') as dispatch:
+        response=auth_recepcionista.post('/api/estudios/upload/',{
+            'estudio_id':imagen_dicom.estudio_id,
+            'archivo':SimpleUploadedFile('valid.png',png_bytes()),
+        })
+    assert response.status_code==200 and response.data['status']=='SUCCESS'
+    predict.assert_called_once()
+    dispatch.assert_not_called()
 def test_cnn_task_is_routed_to_worker_queue(settings):
     route = settings.CELERY_TASK_ROUTES['diagnostico.tasks.procesar_imagen_cnn']
     assert route['queue'] == 'cnn_inference'
@@ -261,6 +288,9 @@ def test_cnn_task_is_routed_to_worker_queue(settings):
 
 def test_checkpoint_missing_is_unit_error(monkeypatch, tmp_path):
     from diagnostico.services import DetectorTorax
+    DetectorTorax._modelo=None
+    DetectorTorax._ready=False
+    DetectorTorax._config_key=None
     monkeypatch.setenv('NEORX_MODEL_PATH',str(tmp_path/'absent.pt'))
     with pytest.raises((RuntimeError, FileNotFoundError)):
         DetectorTorax.cargar()
@@ -287,7 +317,7 @@ def test_async_result_adapter_and_audit(imagen_dicom):
     with patch('diagnostico.tasks.DetectorTorax.desde_dicom', return_value=payload):
         response=procesar_imagen_cnn.run(imagen_dicom.pk)
     assert response['patologias']=={'Neumonía':0.8}
-    assert ResultadoCNN.objects.get(imagen=imagen_dicom).patologias=={'Neumonía':0.8}
+    assert ResultadoCNN.objects.get(imagen=imagen_dicom).patologias == payload
     assert AuditLog.objects.filter(resource_type='resultado_cnn',action='process').exists()
 
 

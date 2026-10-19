@@ -21,10 +21,12 @@ Ubicación: backend/diagnostico/services.py
 
 import os
 import sys
+import threading
 from pathlib import Path
 import numpy as np
 import torch
 import torch.nn as nn
+import torchvision.models
 import torchvision.transforms
 import torchxrayvision as xrv
 import pydicom
@@ -121,6 +123,25 @@ PULMONARY_LABELS = {
 }
 
 
+class _ResNet50FineTuned(nn.Module):
+    """Local checkpoint architecture without downloading additional weights."""
+
+    def __init__(self, num_classes, op_threshs=None):
+        super().__init__()
+        self.model = torchvision.models.resnet50(weights=None, num_classes=num_classes)
+        self.model.conv1 = nn.Conv2d(
+            1, 64, kernel_size=7, stride=2, padding=3, bias=False
+        )
+        if op_threshs is not None:
+            # This buffer is part of the original TorchXRayVision checkpoint,
+            # although fine-tuned inference uses raw logits followed by sigmoid.
+            self.register_buffer("op_threshs", torch.empty_like(op_threshs))
+        self.pathologies = []
+
+    def forward(self, tensor):
+        return self.model(tensor)
+
+
 class DetectorTorax:
     """Encapsula el modelo CNN y todo el preprocesamiento de la imagen.
 
@@ -140,61 +161,117 @@ class DetectorTorax:
     _labels_es = None       # Mapa EN->ES del modelo cargado
     _thresholds = None      # Thresholds por clase (del checkpoint)
     _is_finetuned = False   # True si se cargó checkpoint fine-tuned
+    _ready = False
+    _input_size = 512
+    _model_name = ""
+    _config_key = None
+    _load_lock = threading.Lock()
+    # PyTorch ejecutando varias ResNet-50 a la vez en CPU degrada mucho el
+    # rendimiento: cada solicitud compite por los mismos hilos y termina
+    # tardando más que una sola ejecución ordenada.  El servidor de desarrollo
+    # puede atender solicitudes concurrentes, por lo que protegemos únicamente
+    # la pasada del modelo; el resto del upload continúa siendo concurrente.
+    _inference_lock = threading.Lock()
+
+    @staticmethod
+    def _finetuned_input_size() -> int:
+        """Resuelve una entrada compatible para el checkpoint propio.
+
+        El checkpoint NIH se entrenó a 512 px. Otras dimensiones se admiten
+        para experimentos, pero cambian las puntuaciones y requieren validar
+        de nuevo los umbrales; no son una optimización clínica equivalente.
+        """
+        raw_value = os.environ.get("NEORX_INPUT_SIZE", "512")
+        try:
+            size = int(raw_value)
+        except (TypeError, ValueError):
+            size = 512
+        if size not in {224, 256, 512}:
+            print(f"[DetectorTorax] NEORX_INPUT_SIZE={raw_value!r} no válido; se usará 512.")
+            return 512
+        return size
 
     @classmethod
     def cargar(cls):
-        """Carga el modelo y los transforms una sola vez (singleton)."""
-        if cls._modelo is None:
-            # Verificar si hay checkpoint fine-tuned configurado
-            checkpoint_path = os.environ.get("NEORX_MODEL_PATH")
+        """Carga y precalienta el modelo una sola vez de forma segura."""
+        checkpoint_path = os.environ.get("NEORX_MODEL_PATH")
+        baseline_name = os.environ.get("NEORX_BASELINE_WEIGHTS", "densenet121-res224-all")
+        cache_path = os.environ.get("NEORX_MODEL_CACHE", "")
+        revision = None
+        if checkpoint_path and Path(checkpoint_path).is_file():
+            revision = Path(checkpoint_path).stat().st_mtime_ns
+        config_key = (checkpoint_path or "", revision, baseline_name, cache_path,
+                      cls._finetuned_input_size())
+        if cls._ready and cls._config_key == config_key:
+            return cls._modelo
 
-            if checkpoint_path:
-                # NEORX_MODEL_PATH está configurado -> DEBE existir
-                path_obj = Path(checkpoint_path)
-                if not path_obj.is_file():
-                    raise FileNotFoundError(
-                        f"[DetectorTorax] ERROR: NEORX_MODEL_PATH está configurado "
-                        f"({checkpoint_path}) pero el archivo NO EXISTE. "
-                        f"No se hará fallback a baseline. Verifique la ruta."
-                    )
-                print(f"[DetectorTorax] Cargando modelo fine-tuned desde {checkpoint_path}")
-                cls._cargar_finetuned(checkpoint_path)
-            else:
-                # NEORX_MODEL_PATH no configurado -> usar baseline
-                print("[DetectorTorax] NEORX_MODEL_PATH no configurado. Usando baseline preentrenado.")
-                cls._cargar_baseline()
+        with cls._load_lock:
+            if cls._ready and cls._config_key == config_key:
+                return cls._modelo
+            cls._ready = False
+            cls._modelo = None
+            try:
+                threads = max(
+                    1,
+                    int(os.environ.get("NEORX_TORCH_THREADS", min(4, os.cpu_count() or 1))),
+                )
+                torch.set_num_threads(threads)
+                torch.backends.mkldnn.enabled = True
+                if checkpoint_path:
+                    path_obj = Path(checkpoint_path)
+                    if not path_obj.is_file():
+                        raise FileNotFoundError(
+                            f"[DetectorTorax] ERROR: NEORX_MODEL_PATH está configurado "
+                            f"({checkpoint_path}) pero el archivo NO EXISTE."
+                        )
+                    print(f"[DetectorTorax] Cargando modelo fine-tuned desde {checkpoint_path}")
+                    cls._cargar_finetuned(checkpoint_path)
+                else:
+                    print("[DetectorTorax] Usando baseline preentrenado local de respuesta rápida.")
+                    cls._cargar_baseline()
+                cls._precalentar()
+                cls._config_key = config_key
+                cls._ready = True
+            except Exception:
+                cls._modelo = None
+                cls._transform = None
+                cls._ready = False
+                cls._config_key = None
+                raise
         return cls._modelo
 
     @classmethod
     def _cargar_baseline(cls):
-        """Carga el modelo baseline preentrenado de torchxrayvision.
+        """Carga el baseline gratuito desde backend/models (ignorado por Git)."""
+        model_name = os.environ.get("NEORX_BASELINE_WEIGHTS", "densenet121-res224-all")
+        cache_dir = Path(os.environ.get(
+            "NEORX_MODEL_CACHE",
+            Path(__file__).resolve().parent.parent / "models",
+        ))
+        cache_dir.mkdir(parents=True, exist_ok=True)
 
-        Si el checkpoint local está corrupto (descarga truncada por el crash
-        de la barra de progreso en Windows), se elimina y se re-descarga.
-        """
-        # Ruta del checkpoint local de torchxrayvision
-        weights_dir = Path.home() / ".torchxrayvision" / "models_data"
-        weights_file = weights_dir / "pc-nih-rsna-siim-vin-resnet50-test512-e400-state.pt"
+        threads = max(1, int(os.environ.get("NEORX_TORCH_THREADS", min(8, os.cpu_count() or 1))))
+        torch.set_num_threads(threads)
+        torch.backends.mkldnn.enabled = True
 
-        # Validación de integridad: el archivo completo pesa ~90MB.
-        # Si existe pero es sospechosamente pequeño (<50MB), está truncado.
-        if weights_file.exists() and weights_file.stat().st_size < 50 * 1024 * 1024:
-            print(f"[DetectorTorax] Checkpoint corrupto detectado ({weights_file.stat().st_size} bytes). "
-                  f"Eliminando para re-descarga...")
-            try:
-                weights_file.unlink()
-            except OSError:
-                pass
+        if model_name.startswith("densenet"):
+            cls._modelo = xrv.models.DenseNet(weights=model_name, cache_dir=str(cache_dir))
+        elif model_name.startswith("resnet"):
+            cls._modelo = xrv.models.ResNet(weights=model_name, cache_dir=str(cache_dir))
+        else:
+            raise ValueError(f"Modelo baseline no soportado: {model_name}")
 
-        cls._modelo = xrv.models.ResNet(weights="resnet50-res512-all")
         cls._modelo.eval()
+        cls._input_size = 512 if "res512" in model_name else 224
         cls._transform = torchvision.transforms.Compose([
             xrv.datasets.XRayCenterCrop(),
-            xrv.datasets.XRayResizer(512),
+            xrv.datasets.XRayResizer(cls._input_size),
         ])
         cls._labels_es = PATOLOGIAS_NEUMOLOGIA_BASELINE
         cls._thresholds = {label: 0.5 for label in cls._modelo.pathologies}
         cls._is_finetuned = False
+        cls._model_name = model_name
+        print(f"[DetectorTorax] {model_name} listo ({cls._input_size}px, {threads} hilos CPU).")
 
     @classmethod
     def _cargar_finetuned(cls, checkpoint_path: str):
@@ -203,16 +280,13 @@ class DetectorTorax:
             # weights_only=False necesario porque el checkpoint contiene listas/dicts (metadatos)
             ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
 
-            # Instanciar arquitectura base (los pesos se sobreescriben con load_state_dict)
-            cls._modelo = xrv.models.ResNet(weights="resnet50-res512-all")
-
-            # Reemplazar cabeza de clasificación para que coincida con el checkpoint
             pathologies = ckpt.get("pathologies", NIH_LABELS)
-            in_features = cls._modelo.model.fc.in_features
-            cls._modelo.model.fc = nn.Linear(in_features, len(pathologies))
-
-            # Cargar pesos (incluye backbone + fc + op_norm)
             state_dict = ckpt.get("state_dict", ckpt)
+            op_threshs = state_dict.get("op_threshs")
+
+            # The checkpoint already contains the backbone and classification head.
+            # Build only the empty architecture to avoid downloading or mixing weights.
+            cls._modelo = _ResNet50FineTuned(len(pathologies), op_threshs=op_threshs)
             cls._modelo.load_state_dict(state_dict, strict=True)
 
             # Metadatos para inferencia
@@ -230,12 +304,17 @@ class DetectorTorax:
 
             cls._is_finetuned = True
 
+            cls._input_size = cls._finetuned_input_size()
+            cls._model_name = "resnet50_finetuned_nih"
             cls._transform = torchvision.transforms.Compose([
                 xrv.datasets.XRayCenterCrop(),
-                xrv.datasets.XRayResizer(512),
+                xrv.datasets.XRayResizer(cls._input_size),
             ])
 
             cls._modelo.eval()
+            # Channels-last improves CPU convolution layout without changing
+            # resolution, weights, thresholds or numerical precision.
+            cls._modelo.to(memory_format=torch.channels_last)
             print(f"[DetectorTorax] Fine-tuned model loaded from {checkpoint_path}")
             print(f"[DetectorTorax] Classes: {len(pathologies)} | Thresholds loaded: {len(cls._thresholds)}")
             print(f"[DetectorTorax] Thresholds: {cls._thresholds}")
@@ -246,6 +325,13 @@ class DetectorTorax:
                 f"[DetectorTorax] ERROR loading fine-tuned checkpoint from {checkpoint_path}: {e}. "
                 f"NEORX_MODEL_PATH was set but model failed to load. Check file integrity."
             ) from e
+
+    @classmethod
+    def _precalentar(cls):
+        """Ejecuta una pasada vacía para que la primera radiografía sea rápida."""
+        sample = torch.linspace(-1024.0, 1024.0, cls._input_size * cls._input_size, dtype=torch.float32).reshape(1, 1, cls._input_size, cls._input_size)
+        with torch.inference_mode():
+            cls._modelo(sample)
 
     @staticmethod
     def _a_2d(img):
@@ -259,8 +345,8 @@ class DetectorTorax:
         """Normaliza al rango [-1024, 1024] y aplica crop + resize."""
         img = xrv.datasets.normalize(img_2d, maxval)   # escala según el bit-depth
         img = img[None, :, :]                          # añade canal -> [1, H, W]
-        img = cls._transform(img)                      # -> [1, 512, 512]
-        return torch.from_numpy(img).unsqueeze(0)      # tensor [1, 1, 512, 512]
+        img = cls._transform(img)                      # -> [1, tamaño, tamaño]
+        return torch.from_numpy(img).unsqueeze(0).contiguous(memory_format=torch.channels_last)
 
     @classmethod
     def predecir(cls, img_2d, maxval):
@@ -289,10 +375,19 @@ class DetectorTorax:
         modelo = cls.cargar()
         tensor = cls._preprocesar(cls._a_2d(img_2d), maxval)
 
-        with torch.no_grad():
-            # El forward de xrv ya aplica sigmoide (op_norm) -> salida en [0,1]
-            salida = modelo(tensor)[0].cpu().numpy()
+        # Una CNN compartida no debe competir consigo misma por los hilos de
+        # CPU. Esto mantiene estable el tiempo por estudio cuando llegan dos
+        # cargas casi al mismo tiempo y evita que el cliente agote su espera.
+        with cls._inference_lock, torch.inference_mode():
+            from .gradcam import GeneradorGradCAM
+            output = GeneradorGradCAM.forward(modelo, tensor)
+            # Kaggle training and evaluation used raw logits plus sigmoid.
+            if cls._is_finetuned:
+                output = torch.sigmoid(output)
+            salida = output[0].cpu().numpy()
 
+        if not np.isfinite(salida).all():
+            raise ValueError("La CNN produjo valores no finitos; no se puede interpretar este resultado.")
         probs = dict(zip(modelo.pathologies, salida))
         thresholds = cls._thresholds or {label: 0.5 for label in modelo.pathologies}
 
@@ -318,34 +413,37 @@ class DetectorTorax:
                 hallazgos.append({
                     "etiqueta": nombre_es,
                     "etiqueta_en": clave,
-                    "probabilidad_estimada": round(prob, 4),
+                    "probabilidad_estimada": prob,
                     "detectado": bool(detectado),
-                    "threshold_usado": round(threshold, 4),
+                    "threshold_usado": threshold,
                 })
 
         # Ordenar por probabilidad descendente
         hallazgos.sort(key=lambda x: x["probabilidad_estimada"], reverse=True)
 
+        advertencias = []
+        if cls._is_finetuned and cls._input_size != 512:
+            advertencias.append("Resolución distinta de los 512 px del entrenamiento; las puntuaciones requieren reevaluación.")
+        if sum(float(value) >= 0.995 for value in salida) >= 2:
+            advertencias.append("Salida saturada en varias clases. Revisar imagen y dominio de adquisición; no equivale a certeza diagnóstica.")
         return {
             "hallazgos": hallazgos,
             "probabilidades": prob_dict,
             "thresholds": thresh_dict,
-            "modelo": "resnet50_finetuned_nih" if cls._is_finetuned else "resnet50_baseline",
+            "modelo": cls._model_name,
             "es_fine_tuned": cls._is_finetuned,
-            "nota": "Resultado preliminar - requiere revisión profesional. PENDIENTE DE EJECUCIÓN EXPERIMENTAL.",
+            "resolucion_entrada": cls._input_size,
+            "advertencias": advertencias,
+            "puntuaciones_calibradas": False,
+            "nota": "Resultado preliminar de apoyo; requiere revisión profesional.",
         }
 
     @classmethod
     def desde_dicom(cls, ruta_dcm):
         """Lee un DICOM, corrige la inversión MONOCHROME1 y predice."""
-        from estudios.utils import leer_dicom
+        from estudios.utils import dicom_display_pixels, leer_dicom
         ds = leer_dicom(ruta_dcm)
-        arr = ds.pixel_array.astype(np.float32)
-        if getattr(ds, "PhotometricInterpretation", "") == "MONOCHROME1":
-            arr = arr.max() - arr                      # invierte negativo -> positivo
-        bits = getattr(ds, "BitsStored", 12)
-        maxval = float(2 ** bits - 1)                  # p.ej. 4095 para 12 bits
-        return cls.predecir(arr, maxval)
+        return cls.predecir(dicom_display_pixels(ds).astype(np.float32), 255.0)
 
     @classmethod
     def desde_png(cls, ruta_png):

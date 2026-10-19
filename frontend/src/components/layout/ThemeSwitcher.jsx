@@ -42,7 +42,7 @@ export default function ThemeSwitcher() {
         type="button"
         className="theme-trigger"
         aria-label={`Tema actual: ${activeTheme.name}. Cambiar tema`}
-        aria-haspopup="listbox"
+        aria-haspopup="true"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
@@ -55,7 +55,7 @@ export default function ThemeSwitcher() {
         {open && (
           <motion.div
             className="theme-popover"
-            role="listbox"
+            role="group"
             aria-label="Tema de la interfaz"
             initial={reduceMotion ? false : { opacity: 0, transform: 'translateY(-8px) scale(.96)', filter: 'blur(3px)' }}
             animate={{ opacity: 1, transform: 'translateY(0) scale(1)', filter: 'blur(0)' }}
@@ -68,8 +68,7 @@ export default function ThemeSwitcher() {
               {themes.map((option) => (
                 <button
                   type="button"
-                  role="option"
-                  aria-selected={option.id === theme}
+                  aria-pressed={option.id === theme}
                   className="theme-option"
                   key={option.id}
                   onClick={(event) => chooseTheme(option.id, event)}

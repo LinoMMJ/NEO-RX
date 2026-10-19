@@ -235,7 +235,7 @@ export default function BuscadorPaciente({ seleccionado, onSelect }) {
             disabled:opacity-60 disabled:cursor-not-allowed"
         >
           {creando ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-          {creando ? 'Registrando...' : 'Registrar y seleccionar'}
+          {creando ? 'Registrando…' : 'Registrar y seleccionar'}
         </button>
       </motion.div>
     )
@@ -254,7 +254,7 @@ export default function BuscadorPaciente({ seleccionado, onSelect }) {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onFocus={() => resultados.length && setAbierto(true)}
-          placeholder="Buscar por nombre o CI..."
+          placeholder="Buscar por nombre o CI…"
           className="w-full pl-9 pr-9 py-2.5 rounded-xl border border-slate-200 font-body text-sm text-navy
             focus:outline-none focus:ring-2 focus:ring-teal-med/40 focus:border-teal-med transition-all"
           aria-label="Buscar paciente"

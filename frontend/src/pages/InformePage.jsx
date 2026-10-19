@@ -1,10 +1,14 @@
-import usePrivateImage from '../hooks/usePrivateImage'
+import VisorImagen from '../components/scan/VisorImagen'
+import useGradCAM from '../hooks/useGradCAM'
+import { formatModelScore } from '../utils/modelScore'
+import { partitionFindings } from '../utils/modelFindings'
+import { errorMessage } from '../api/errors'
 import { useState, useEffect } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { Link, useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Save, CheckCircle, PenLine, ChevronDown, BarChart3, FileText,
-  User, AlertTriangle, ShieldCheck, X, Download,
+  User, AlertTriangle, ShieldCheck, X, Download, Activity, Clock3, BrainCircuit,
 } from 'lucide-react'
 import { getInforme, updateInforme, descargarInformePDF } from '../api/informes'
 import { useAuth } from '../context/useAuth'
@@ -22,43 +26,24 @@ const PROY_LABEL = { PA: 'PA · Postero-Anterior', AP: 'AP · Antero-Posterior',
 
 // Cada sección anatómica con su acento de color (estilo informe médico real)
 const SECCIONES = [
-  { key: 'tecnica',         label: 'Técnica',                rows: 2, color: 'border-slate-300' },
-  { key: 'hallazgos',       label: 'Hallazgos Radiológicos', rows: 9, color: 'border-blue-500', probs: true },
-  { key: 'impresion',       label: 'Impresión Diagnóstica',  rows: 4, color: 'border-teal-med' },
-  { key: 'recomendaciones', label: 'Recomendaciones',        rows: 3, color: 'border-orange-500' },
+  { key: 'tecnica',         label: 'Técnica',                rows: 2 },
+  { key: 'hallazgos',       label: 'Hallazgos Radiológicos', rows: 9, probs: true },
+  { key: 'correlacion_clinica', label: 'Correlación Clínico-Radiológica', rows: 5 },
+  { key: 'impresion',       label: 'Impresión Diagnóstica',  rows: 4 },
+  { key: 'recomendaciones', label: 'Recomendaciones',        rows: 3 },
 ]
 
-function barColor(p) {
-  if (p >= 0.70) return 'from-danger to-rose-400'
-  if (p >= 0.40) return 'from-orange-400 to-orange-500'
-  if (p >= 0.20) return 'from-warning to-amber-400'
-  return 'from-slate-400 to-slate-500'
-}
+const PASOS_ESTUDIO = [
+  ['Carga', 'Imagen registrada'],
+  ['IA', 'CNN procesada'],
+  ['Borrador', 'Informe creado'],
+  ['Revisión', 'Validación médica'],
+  ['Firma', 'Informe definitivo'],
+]
 
-function ThumbRadiografia({ url }) {
-  const privateUrl = usePrivateImage(url)
-  const [error, setError] = useState(false)
-  if (!privateUrl || error) {
-    return (
-      <div className="aspect-square rounded-xl bg-scan-bg border border-[#1e3a5f] flex flex-col items-center justify-center gap-2">
-        <svg viewBox="0 0 200 200" className="w-24 h-24" aria-hidden="true">
-          <ellipse cx="70" cy="100" rx="40" ry="60" fill="none" stroke="#1e3a5f" strokeWidth="2" />
-          <ellipse cx="130" cy="100" rx="40" ry="60" fill="none" stroke="#1e3a5f" strokeWidth="2" />
-          <line x1="100" y1="40" x2="100" y2="160" stroke="#1e3a5f" strokeWidth="1" />
-        </svg>
-        <p className="font-body text-xs text-white/40">Imagen no disponible</p>
-      </div>
-    )
-  }
-  return (
-    <img
-      src={privateUrl}
-      alt="Radiografía de tórax del estudio"
-      onError={() => setError(true)}
-      className="aspect-square w-full object-contain rounded-xl bg-scan-bg border border-[#1e3a5f]"
-      style={{ filter: 'brightness(1.1) contrast(1.05)' }}
-    />
-  )
+function isCompleted(value) {
+  const text = String(value || '').trim()
+  return text.length > 0 && !/\[(describir|valorar|completar)[^\]]*\]/i.test(text)
 }
 
 export default function InformePage() {
@@ -74,6 +59,14 @@ export default function InformePage() {
   const [showProbs, setShowProbs] = useState(false)
   const [confirmar, setConfirmar] = useState(false)
   const [descargando, setDescargando] = useState(false)
+  const maps = useGradCAM()
+  const dirty = informe && Object.keys(form).some((key) => form[key] !== (informe[key] || ''))
+  useEffect(() => {
+    if (!dirty) return
+    const warn = (event) => { event.preventDefault(); event.returnValue = '' }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [dirty])
 
   useEffect(() => {
     if (!id) return
@@ -83,6 +76,7 @@ export default function InformePage() {
         setForm({
           tecnica: data.tecnica || '',
           hallazgos: data.hallazgos || '',
+          correlacion_clinica: data.correlacion_clinica || '',
           impresion: data.impresion || '',
           recomendaciones: data.recomendaciones || '',
         })
@@ -137,7 +131,7 @@ export default function InformePage() {
       }
       toast.success(msg[estado])
     } catch (e) {
-      if (e.response) toast.error(e.response.data?.error || 'No se pudo guardar el informe.')
+      if (e.response) toast.error(errorMessage(e, 'No se pudo guardar el informe.'))
       else toast.red()
     } finally {
       setGuardando(null)
@@ -167,11 +161,23 @@ export default function InformePage() {
   const edad = calcularEdad(p.fecha_nacimiento)
   const proy = informe.proyeccion?.tipo || 'PA'
   const probs = informe.probabilidades || {}
-  const probsList = Object.entries(probs).filter(([, v]) => v >= 0.05)
+  const { rows: probsList, candidates } = partitionFindings(probs, informe.hallazgos_ia)
+  const hasThresholds = probsList.some((row) => row.threshold !== null)
+  const checklist = [
+    ['Técnica verificada', isCompleted(form.tecnica)],
+    ['Hallazgos revisados', isCompleted(form.hallazgos)],
+    ['Correlación clínica registrada', isCompleted(form.correlacion_clinica)],
+    ['Impresión diagnóstica revisada', isCompleted(form.impresion)],
+    ['Recomendaciones definidas', isCompleted(form.recomendaciones)],
+  ]
+  const checklistCompleto = checklist.every(([, done]) => done)
+  const pasoActual = informe.estado === 'firmado' ? 4 : informe.estado === 'revisado' ? 3 : 2
 
   return (
-    <div className="max-w-6xl mx-auto">
-      <div className="mb-6">
+    <div className="clinical-report-page max-w-6xl mx-auto">
+      <div className="clinical-report-heading mb-6">
+        <Link to={`/analisis/${informe.estudio}`} onClick={(event) => { if (dirty && !window.confirm('Hay cambios sin guardar. ¿Salir del informe?')) event.preventDefault() }} className="inline-flex mb-3 text-sm underline text-teal-med">Volver a la radiografía y al análisis</Link>
+        <p className="clinical-eyebrow">EXPEDIENTE RADIOLÓGICO · REVISIÓN MÉDICA</p>
         <h1 className="font-heading font-bold text-navy text-3xl tracking-tight">Informe Radiológico</h1>
         <p className="font-body text-slate-500 text-sm mt-1">Neo Rayos X Digital · Pre-informe asistido por CNN</p>
       </div>
@@ -179,8 +185,12 @@ export default function InformePage() {
       <div className="grid grid-cols-1 lg:grid-cols-[2fr_3fr] gap-6">
         {/* ════ COLUMNA IZQUIERDA: imagen + paciente ════ */}
         <aside className="space-y-4 lg:sticky lg:top-20 self-start">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
-            <ThumbRadiografia url={informe.imagen_png_url} />
+          <div className="bg-scan-bg rounded-2xl border border-slate-200 shadow-sm p-4">
+            <VisorImagen imagenUrl={informe.imagen_png_url} patologias={informe.probabilidades}
+              analysisEnabled={Boolean(informe.imagen_origen)} gradCAM={maps.data}
+              gradCAMCargando={maps.loading} gradCAMError={maps.error}
+              patologiaSeleccionada={maps.pathology}
+              onPatologiaChange={(name) => maps.load(informe.imagen_origen, name)} />
           </div>
 
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
@@ -239,8 +249,40 @@ export default function InformePage() {
             </div>
           )}
 
+          <section className="grid gap-3 md:grid-cols-[1.05fr_1fr]" aria-label="Resumen del estudio">
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <BrainCircuit className="h-4 w-4 text-blue-600" />
+                  <h2 className="font-heading text-xs font-bold uppercase tracking-wider text-slate-600">Apoyo de IA</h2>
+                </div>
+                <span className="rounded-full border border-slate-200 px-2.5 py-1 text-xs font-bold text-slate-600">Revisión médica</span>
+              </div>
+              <div className="mt-3 flex items-end gap-3">
+                <span className="font-mono text-2xl font-bold text-navy">{hasThresholds ? candidates.length : '—'}</span>
+                <span className="pb-1 text-xs text-slate-500">señales sobre su umbral</span>
+              </div>
+              <p className="mt-2 text-xs leading-relaxed text-slate-500">{!hasThresholds ? 'Resultado histórico sin umbrales conservados.' : candidates.length > 1 ? 'Múltiples señales; la IA no permite escoger un diagnóstico único.' : candidates.length === 1 ? 'Señal pendiente de confirmar en la imagen.' : 'Sin señales sobre umbral; no descarta enfermedad.'} No determina urgencia.</p>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="flex items-center gap-2"><Activity className="h-4 w-4 text-teal-med" /><h2 className="font-heading text-xs font-bold uppercase tracking-wider text-slate-600">Trazabilidad del estudio</h2></div>
+              <ol className="mt-4 grid grid-cols-5 gap-1" aria-label="Estado del flujo clínico">
+                {PASOS_ESTUDIO.map(([title, detail], index) => {
+                  const complete = index <= pasoActual
+                  const current = index === pasoActual
+                  return <li key={title} className="min-w-0">
+                    <div className={`h-1 rounded-full ${complete ? 'bg-teal-med' : 'bg-slate-200'}`} />
+                    <p className={`mt-2 text-[10px] font-bold leading-tight ${current ? 'text-navy' : complete ? 'text-teal-med' : 'text-slate-400'}`}>{title}</p>
+                    <p className="mt-0.5 hidden text-[9px] leading-tight text-slate-400 lg:block">{detail}</p>
+                  </li>
+                })}
+              </ol>
+            </div>
+          </section>
+
           {/* Secciones del informe */}
-          {SECCIONES.map(({ key, label, rows, color, probs: hasProbs }) => (
+          {SECCIONES.map(({ key, label, rows, probs: hasProbs }) => (
             <div key={key}>
               <div className="flex items-center justify-between mb-1.5">
                 <label htmlFor={key} className="font-heading text-[11px] font-bold text-slate-500 tracking-widest uppercase">
@@ -252,7 +294,7 @@ export default function InformePage() {
                     className="flex items-center gap-1.5 text-xs font-semibold text-teal-med hover:underline cursor-pointer"
                     aria-expanded={showProbs}
                   >
-                    <BarChart3 className="w-3.5 h-3.5" /> Probabilidades CNN
+                    <BarChart3 className="w-3.5 h-3.5" /> Puntuaciones CNN
                     <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showProbs ? 'rotate-180' : ''}`} />
                   </button>
                 )}
@@ -265,8 +307,8 @@ export default function InformePage() {
                   onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
                   rows={rows}
                   disabled={firmado}
-                  className={`w-full px-4 py-3 rounded-r-lg border border-l-4 ${color} border-y-slate-200 border-r-slate-200
-                    font-body text-sm text-navy leading-relaxed resize-y bg-white transition-all
+                  className={`w-full px-4 py-3 rounded-lg border border-slate-200
+                    font-body text-sm text-navy leading-relaxed resize-y bg-white transition-colors
                     focus:outline-none focus:ring-2 focus:ring-teal-med/40 focus:ring-offset-1
                     disabled:bg-slate-50 disabled:text-slate-500 disabled:resize-none
                     ${key === 'hallazgos' ? 'whitespace-pre-wrap font-mono text-[13px]' : ''}`}
@@ -285,23 +327,25 @@ export default function InformePage() {
                         Salida del modelo
                       </p>
                       {probsList.length === 0 ? (
-                        <p className="font-body text-xs text-slate-400">Sin hallazgos &gt; 5%.</p>
+                        <p className="font-body text-xs text-slate-400">No hay puntuaciones disponibles.</p>
                       ) : (
                         <div className="space-y-2.5">
-                          {probsList.map(([nombre, v]) => (
-                            <div key={nombre}>
+                          <p className="text-xs text-slate-500">Activación /100, no certeza diagnóstica.</p>
+                          {probsList.map(({ name, score, threshold, above }) => (
+                            <div key={name}>
                               <div className="flex justify-between items-baseline mb-0.5">
-                                <span className="font-body text-[11px] text-navy">{nombre}</span>
-                                <span className="font-mono text-[11px] font-bold text-slate-600">{Math.round(v * 100)}%</span>
+                                <span className="font-body text-[11px] text-navy">{name}</span>
+                                <span className="font-mono text-[11px] font-bold text-slate-600">{formatModelScore(score)}</span>
                               </div>
                               <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
                                 <motion.div
-                                  className={`h-full rounded-full bg-gradient-to-r ${barColor(v)}`}
+                                  className={`h-full rounded-full ${above ? 'bg-teal-med' : 'bg-slate-400'}`}
                                   initial={{ width: 0 }}
-                                  animate={{ width: `${v * 100}%` }}
+                                  animate={{ width: `${score * 100}%` }}
                                   transition={{ duration: 0.6, ease: 'easeOut' }}
                                 />
                               </div>
+                              <p className="mt-1 text-[10px] text-slate-500">{threshold === null ? 'Sin umbral registrado' : `${above ? 'Sobre' : 'Bajo'} umbral ${formatModelScore(threshold)}`}</p>
                             </div>
                           ))}
                         </div>
@@ -329,6 +373,18 @@ export default function InformePage() {
               </div>
             </div>
 
+            {!firmado && (
+              <div className="mb-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div className="flex items-center gap-2"><Clock3 className="h-4 w-4 text-teal-med" /><h3 className="font-heading text-xs font-bold uppercase tracking-wider text-slate-600">Checklist previo a la firma</h3></div>
+                <ul className="mt-3 grid gap-2 sm:grid-cols-2" aria-label="Checklist clínico">
+                  {checklist.map(([label, done]) => <li key={label} className={`flex items-center gap-2 text-xs ${done ? 'text-emerald-700' : 'text-slate-500'}`}>
+                    <CheckCircle className={`h-4 w-4 flex-none ${done ? 'text-emerald-600' : 'text-slate-300'}`} />{label}
+                  </li>)}
+                </ul>
+                {!checklistCompleto && <p className="mt-3 text-xs text-amber-700">Completa las secciones marcadas antes de firmar el informe.</p>}
+              </div>
+            )}
+
             {firmado && (
               <div className="mb-4">
                 <button
@@ -340,11 +396,12 @@ export default function InformePage() {
                     disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   {descargando ? <Spinner size="sm" color="white" /> : <Download className="w-4 h-4" />}
-                  {descargando ? 'Generando PDF...' : 'Descargar informe firmado (PDF)'}
+                  {descargando ? 'Generando PDF…' : 'Descargar informe firmado (PDF)'}
                 </button>
               </div>
             )}
 
+            {!firmado && <p role="status" className="text-sm text-slate-600 mb-3">{dirty ? 'Cambios sin guardar. Guarda y revisa el contenido antes de firmar.' : 'Contenido guardado.'} {!checklistCompleto && ' Completa los campos de la plantilla entre corchetes.'}</p>}
             <div className="flex flex-col sm:flex-row gap-3 pt-4 border-t border-slate-100">
               <button
                 onClick={() => guardar('borrador')}
@@ -368,8 +425,8 @@ export default function InformePage() {
               </button>
               <button
                 onClick={() => setConfirmar(true)}
-                disabled={firmado || guardando || informe?.estado !== 'revisado'}
-                title="Marca el informe como revisado antes de firmar"
+                disabled={firmado || guardando || dirty || informe?.estado !== 'revisado' || !checklistCompleto}
+                title={!checklistCompleto ? 'Completa el checklist clínico antes de firmar' : 'Marca el informe como revisado antes de firmar'}
                 className="flex-1 inline-flex items-center justify-center gap-2 py-2.5 rounded-lg bg-navy
                   text-white font-heading font-semibold text-sm shadow-md hover:brightness-125 hover:scale-[1.01] transition-all cursor-pointer
                   disabled:opacity-50 disabled:cursor-not-allowed"

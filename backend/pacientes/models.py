@@ -58,6 +58,7 @@ class Estudio(models.Model):
     ESTADO_CHOICES = [
         ("pendiente", "Pendiente"),
         ("en_proceso", "En Proceso"),
+        ("registrado", "Registrado sin analisis CNN"),
         ("completado", "Completado"),
         ("requiere_repeticion", "Requiere repetición"),
     ]

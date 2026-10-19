@@ -68,6 +68,12 @@ class TestInformeAPI:
             es_nitida=True,
             varianza_laplaciana=150.0,
             tipo_proyeccion="PA",
+            clasificacion_imagen="chest_xray",
+            region_anatomica="Torax",
+            es_radiografia=True,
+            apta_para_cnn=True,
+            confianza_clasificacion=0.99,
+            fuente_clasificacion="test",
         )
         ResultadoCNN.objects.create(
             imagen=imagen,
@@ -84,8 +90,11 @@ class TestInformeAPI:
         assert "id" in data
         assert data["estado"] == "borrador"
         assert "hallazgos" in data
+        assert "correlacion_clinica" in data
         assert "impresion" in data
         assert "recomendaciones" in data
+        assert "Plantilla de lectura radiográfica" in data["hallazgos"]
+        assert "Síntomas y evolución" in data["correlacion_clinica"]
 
     def test_generar_informe_sin_cnn(self, auth_client):
         from pacientes.models import Paciente, Estudio
@@ -143,7 +152,7 @@ class TestInformeAPI:
         informe = InformePreliminar.objects.create(
             estudio=imagen_con_resultado.estudio,
             hallazgos="Hallazgos", impresion="Impresión",
-            recomendaciones="Recomendaciones", estado="revisado",
+            correlacion_clinica="Correlación clínica", recomendaciones="Recomendaciones", estado="revisado",
         )
         url = reverse("informe-detail", kwargs={"pk": informe.id})
         response = auth_client.put(url, {"estado": "firmado"}, format="json")
@@ -151,6 +160,18 @@ class TestInformeAPI:
         assert response.json()["estado"] == "firmado"
         assert response.json()["fecha_firmado"] is not None
         assert response.json()["medico"] is not None
+
+    def test_no_permite_firmar_sin_correlacion_clinica(self, auth_client, imagen_con_resultado):
+        informe = InformePreliminar.objects.create(
+            estudio=imagen_con_resultado.estudio,
+            hallazgos="Hallazgos", impresion="Impresión", recomendaciones="Recomendaciones", estado="revisado",
+        )
+        response = auth_client.put(
+            reverse("informe-detail", kwargs={"pk": informe.id}),
+            {"estado": "firmado"}, format="json",
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "checklist" in str(response.json()).lower()
 
 
 class TestExportPDF:

@@ -28,6 +28,56 @@ def leer_dicom(ruta, force=False):
         return pydicom.dcmread(ruta, force=True)
 
 
+def dicom_pixel_array_2d(ds, invert=True):
+    """Convierte píxeles DICOM monocromos, RGB o multicuadro a una matriz 2D."""
+    arr = ds.pixel_array.astype(np.float32)
+    if arr.size == 0:
+        raise ValueError("El DICOM no contiene píxeles.")
+
+    # En multicuadro se usa el primer cuadro para el análisis radiográfico.
+    frames = int(getattr(ds, "NumberOfFrames", 1) or 1)
+    if frames > 1 and arr.ndim >= 3:
+        arr = arr[0]
+
+    if arr.ndim == 3:
+        # pydicom entrega normalmente RGB como [alto, ancho, canales].
+        if arr.shape[-1] in (3, 4):
+            rgb = arr[..., :3]
+            arr = 0.299 * rgb[..., 0] + 0.587 * rgb[..., 1] + 0.114 * rgb[..., 2]
+        elif arr.shape[0] in (3, 4):
+            rgb = np.moveaxis(arr[:3], 0, -1)
+            arr = 0.299 * rgb[..., 0] + 0.587 * rgb[..., 1] + 0.114 * rgb[..., 2]
+        else:
+            arr = arr[0]
+
+    if arr.ndim != 2:
+        raise ValueError(f"Dimensiones DICOM no soportadas: {arr.shape}")
+
+    if invert and str(getattr(ds, "PhotometricInterpretation", "")).upper() == "MONOCHROME1":
+        arr = arr.max() - arr
+    return arr.astype(np.float32, copy=False)
+
+
+def dicom_display_pixels(ds):
+    """Consistent display/CNN grayscale, including signed pixels and VOI LUT.
+
+    NIH training used displayed 8-bit PNGs. Dividing raw DICOM pixels by
+    2**BitsStored ignores rescale/windowing and may change the input domain.
+    """
+    from pydicom.pixels import apply_modality_lut, apply_voi_lut
+    pixels = dicom_pixel_array_2d(ds, invert=False)
+    if int(getattr(ds, 'SamplesPerPixel', 1)) == 1:
+        pixels = apply_modality_lut(pixels, ds)
+        pixels = apply_voi_lut(pixels, ds)
+    pixels = np.asarray(pixels, dtype=np.float32)
+    if not np.isfinite(pixels).all():
+        raise ValueError('Píxeles DICOM no finitos.')
+    low, high = float(pixels.min()), float(pixels.max())
+    display = (pixels - low) / max(high - low, 1e-8)
+    if str(getattr(ds, 'PhotometricInterpretation', '')).upper() == 'MONOCHROME1':
+        display = 1.0 - display
+    return np.rint(display * 255).astype(np.uint8)
+
 def detect_projection_type(ruta_dcm_o_metadata):
     """Detecta el tipo de proyección de la radiografía de tórax.
 
@@ -69,11 +119,7 @@ def detect_projection_type(ruta_dcm_o_metadata):
     try:
         if es_dicom:
             ds = leer_dicom(ruta)
-            arr = ds.pixel_array.astype(np.float32)
-            if getattr(ds, "PhotometricInterpretation", "") == "MONOCHROME1":
-                arr = arr.max() - arr
-            if arr.ndim > 2:
-                arr = arr[:, :, 0]
+            arr = dicom_pixel_array_2d(ds)
         else:
             arr = cv2.imread(ruta, cv2.IMREAD_GRAYSCALE)
             if arr is None:
@@ -126,13 +172,11 @@ def calcular_borrosidad(ruta_imagen, umbral=100.0):
     Funciona con PNG y con DICOM (convierte pixel_array a escala de grises).
     Una varianza menor al umbral indica borrosidad cinética."""
     ruta = str(ruta_imagen)
-    if ruta.lower().endswith(".dcm"):
+    if ruta.lower().endswith((".dcm", ".dicom")):
         ds = leer_dicom(ruta)
-        arr = ds.pixel_array.astype(np.float32)
+        arr = dicom_pixel_array_2d(ds)
         arr = (arr - arr.min()) / (arr.max() - arr.min() + 1e-8) * 255
         imagen_gris = arr.astype(np.uint8)
-        if imagen_gris.ndim > 2:
-            imagen_gris = imagen_gris[:, :, 0]
     else:
         imagen_gris = cv2.imread(ruta, cv2.IMREAD_GRAYSCALE)
         if imagen_gris is None:

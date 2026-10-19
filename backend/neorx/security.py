@@ -111,10 +111,10 @@ class SecurityHeadersMiddleware(MiddlewareMixin):
         # CSP - Content Security Policy
         csp = (
             "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+            "script-src 'self'; "
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
             "font-src 'self' https://fonts.gstatic.com; "
-            "img-src 'self' data: https:; "
+            "img-src 'self' data: blob:; "
             "connect-src 'self' ws: wss:; "
             "frame-ancestors 'none'; "
             "base-uri 'self'; "
@@ -128,6 +128,7 @@ class SecurityHeadersMiddleware(MiddlewareMixin):
         response["X-XSS-Protection"] = "1; mode=block"
         response["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+        response["Cross-Origin-Resource-Policy"] = "same-origin"
 
         # Cache control para APIs
         if request.path.startswith("/api/"):

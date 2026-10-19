@@ -11,5 +11,7 @@ FROM nginx:alpine AS runtime
 COPY --from=builder /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD wget -q --spider http://localhost/ || exit 1
+# Usar IPv4 explícito: la imagen monta la configuración como solo lectura y el
+# script oficial de Nginx no puede añadir el listener IPv6 para `localhost`.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD wget -q --spider http://127.0.0.1/ || exit 1
 CMD ["nginx", "-g", "daemon off;"]

@@ -77,8 +77,19 @@ def imagen_dicom(db):
     paciente = Paciente.objects.create(nombres="Fixture", apellidos="Paciente", ci="fixture-ci",
                                        fecha_nacimiento=date(1980, 1, 1), genero="M")
     estudio = Estudio.objects.create(paciente=paciente, fecha=date.today())
-    return ImagenDICOM.objects.create(estudio=estudio, archivo_dicom="dicom/unit-test.dcm",
-                                      es_nitida=True, tipo_proyeccion="PA", estado_procesamiento="procesado")
+    return ImagenDICOM.objects.create(
+        estudio=estudio,
+        archivo_dicom="dicom/unit-test.dcm",
+        es_nitida=True,
+        tipo_proyeccion="PA",
+        estado_procesamiento="procesado",
+        clasificacion_imagen="chest_xray",
+        region_anatomica="Torax",
+        es_radiografia=True,
+        apta_para_cnn=True,
+        confianza_clasificacion=0.99,
+        fuente_clasificacion="test",
+    )
 
 
 @pytest.fixture

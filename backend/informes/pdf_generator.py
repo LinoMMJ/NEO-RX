@@ -178,7 +178,7 @@ def generar_pdf_informe(informe, contexto=None) -> BytesIO:
     estudio_fecha = contexto.get("estudio_fecha") or estudio.fecha.strftime("%d/%m/%Y")
     edad = contexto.get("edad") or _edad(paciente)
     proyeccion = contexto.get("proyeccion") or getattr(
-        estudio.imagenes.first(), "tipo_proyeccion", "PA"
+        informe.imagen_origen or estudio.imagenes.first(), "tipo_proyeccion", "No registrada"
     )
 
     story = []
@@ -228,6 +228,7 @@ def generar_pdf_informe(informe, contexto=None) -> BytesIO:
     secciones = [
         ("TÉCNICA", _sanitize(informe.tecnica)),
         ("HALLAZGOS", _sanitize(informe.hallazgos)),
+        ("CORRELACIÓN CLÍNICO-RADIOLÓGICA", _sanitize(informe.correlacion_clinica)),
         ("IMPRESIÓN DIAGNÓSTICA", _sanitize(informe.impresion)),
         ("RECOMENDACIONES", _sanitize(informe.recomendaciones)),
     ]

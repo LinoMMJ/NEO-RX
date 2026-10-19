@@ -1,16 +1,31 @@
-# React + Vite
+# Frontend de Neo RX
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Interfaz React 19 para la gestión de pacientes, estudios radiológicos, resultados de la CNN, informes, métricas y administración de usuarios.
 
-Currently, two official plugins are available:
+## Comandos
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+```powershell
+npm install
+npm run dev
+npm run lint
+npm test
+npm run build
+npm run preview
+```
 
-## React Compiler
+`npm test` ejecuta las pruebas unitarias, las pruebas de sesión JWT y la validación de contraste de todos los temas.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## API
 
-## Expanding the ESLint configuration
+La URL predeterminada es `http://localhost:8000/api`. Para cambiarla crea `.env.local`:
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```text
+VITE_API_URL=https://tu-dominio.com/api
+```
+
+## Criterios de interfaz
+
+- Los permisos y opciones visibles dependen del rol autenticado.
+- Los resultados de la CNN siempre se presentan como apoyo para revisión médica.
+- Los temas conservan contraste comprobado y respetan `prefers-reduced-motion`.
+- Los archivos clínicos se consultan mediante endpoints autenticados; no se enlazan como medios públicos.

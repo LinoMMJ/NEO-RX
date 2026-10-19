@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it } from 'vitest'
 import ThemeSwitcher from '../components/layout/ThemeSwitcher'
 import { ThemeProvider } from '../context/ThemeContext'
@@ -12,8 +12,9 @@ describe('selector de temas', () => {
   it('muestra las siete paletas y guarda la selección hospitalaria', async () => {
     render(<ThemeProvider><ThemeSwitcher /></ThemeProvider>)
     fireEvent.click(screen.getByRole('button', { name: /Tema actual:/ }))
-    expect(screen.getAllByRole('option')).toHaveLength(7)
-    fireEvent.click(screen.getByRole('option', { name: 'Hospital' }))
+    const themeGroup = screen.getByRole('group', { name: 'Tema de la interfaz' })
+    expect(within(themeGroup).getAllByRole('button')).toHaveLength(7)
+    fireEvent.click(within(themeGroup).getByRole('button', { name: 'Hospital' }))
 
     await waitFor(() => expect(document.documentElement.dataset.theme).toBe('hospital'))
     expect(document.documentElement.style.colorScheme).toBe('light')

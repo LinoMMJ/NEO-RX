@@ -18,7 +18,7 @@ class NeorxConfig(AppConfig):
             return
         # En el dev server, ready() se llama dos veces (watcher + serving process).
         # Solo precargar en el proceso que sirve requests (RUN_MAIN=true).
-        if os.environ.get('RUN_MAIN') != 'true':
+        if os.environ.get('RUN_MAIN') != 'true' and '--noreload' not in sys.argv:
             return
         try:
             from diagnostico.services import DetectorTorax

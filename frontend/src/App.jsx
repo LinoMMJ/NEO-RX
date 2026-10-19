@@ -10,8 +10,10 @@ import LoginPage from './pages/LoginPage'
 const PasswordResetPage = lazy(() => import('./pages/PasswordResetPage'))
 const DashboardPage = lazy(() => import('./pages/DashboardPage'))
 const EscaneoPage = lazy(() => import('./pages/EscaneoPage'))
+const RegistroEstudioPage = lazy(() => import('./pages/RegistroEstudioPage'))
 const AnalisisPage = lazy(() => import('./pages/AnalisisPage'))
 const InformePage = lazy(() => import('./pages/InformePage'))
+const InformesPage = lazy(() => import('./pages/InformesPage'))
 const PacientesPage = lazy(() => import('./pages/PacientesPage'))
 const EstudiosPage = lazy(() => import('./pages/EstudiosPage'))
 const ActividadPage = lazy(() => import('./pages/ActividadPage'))
@@ -42,11 +44,14 @@ function AppRoutes() {
       <Route path="/escaneo" element={
         <ProtectedRoute roles={['recepcionista', 'medico']}><Layout><EscaneoPage /></Layout></ProtectedRoute>
       } />
+      <Route path="/estudios/registrar" element={
+        <ProtectedRoute roles={['recepcionista', 'medico']}><Layout><RegistroEstudioPage /></Layout></ProtectedRoute>
+      } />
       <Route path="/informes/:id" element={
         <ProtectedRoute roles={['medico']}><Layout><InformePage /></Layout></ProtectedRoute>
       } />
       <Route path="/informes" element={
-        <ProtectedRoute roles={['medico']}><Layout><InformePage /></Layout></ProtectedRoute>
+        <ProtectedRoute roles={['medico']}><Layout><InformesPage /></Layout></ProtectedRoute>
       } />
       <Route path="/pacientes" element={
         <ProtectedRoute><Layout><PacientesPage /></Layout></ProtectedRoute>

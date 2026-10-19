@@ -36,12 +36,17 @@ class TestDetectorTorax:
 
     @patch("diagnostico.services.xrv")
     @patch("diagnostico.services.torch")
-    def test_cargar_modelo_singleton(self, mock_torch, mock_xrv):
+    def test_cargar_modelo_singleton(self, mock_torch, mock_xrv, monkeypatch):
         from diagnostico.services import DetectorTorax
 
         mock_model = MagicMock()
         mock_model.pathologies = ["Pneumonia", "Effusion"]
-        mock_xrv.models.ResNet.return_value = mock_model
+        mock_xrv.models.DenseNet.return_value = mock_model
+        monkeypatch.delenv("NEORX_MODEL_PATH", raising=False)
+        monkeypatch.setenv("NEORX_BASELINE_WEIGHTS", "densenet121-res224-all")
+        DetectorTorax._modelo = None
+        DetectorTorax._ready = False
+        DetectorTorax._config_key = None
 
         # Primera carga
         modelo1 = DetectorTorax.cargar()
@@ -50,7 +55,10 @@ class TestDetectorTorax:
         # Segunda carga debe retornar el mismo (singleton)
         modelo2 = DetectorTorax.cargar()
         assert modelo2 is mock_model
-        assert mock_xrv.models.ResNet.call_count == 1
+        assert mock_xrv.models.DenseNet.call_count == 1
+        DetectorTorax._modelo = None
+        DetectorTorax._ready = False
+        DetectorTorax._config_key = None
 
     @patch("diagnostico.services.DetectorTorax.cargar")
     def test_predecir_desde_png(self, mock_cargar):
@@ -70,6 +78,53 @@ class TestDetectorTorax:
         assert resultado["probabilidades"]["Pneumonia"] == pytest.approx(0.8)
         assert resultado["probabilidades"]["Effusion"] == pytest.approx(0.1)
         assert resultado["hallazgos"][0]["etiqueta"] == "Neumonía"
+
+
+    @patch("diagnostico.services.DetectorTorax.cargar")
+    def test_predecir_finetuned_convierte_logits_a_probabilidades(self, mock_cargar):
+        from diagnostico.services import DetectorTorax
+
+        mock_model = MagicMock()
+        mock_model.pathologies = ["Pneumonia", "Effusion"]
+        mock_model.return_value = torch.tensor([[0.0, 2.0]])
+        mock_cargar.return_value = mock_model
+
+        previous = (
+            DetectorTorax._transform,
+            DetectorTorax._labels_es,
+            DetectorTorax._thresholds,
+            DetectorTorax._is_finetuned,
+            DetectorTorax._model_name,
+        )
+        try:
+            DetectorTorax._transform = lambda value: value
+            DetectorTorax._labels_es = {
+                "Pneumonia": "Neumonia",
+                "Effusion": "Derrame pleural",
+            }
+            DetectorTorax._thresholds = {"Pneumonia": 0.6, "Effusion": 0.8}
+            DetectorTorax._is_finetuned = True
+            DetectorTorax._model_name = "resnet50_finetuned_nih"
+
+            result = DetectorTorax.predecir(
+                np.zeros((32, 32), dtype=np.float32), 255.0
+            )
+
+            assert result["probabilidades"]["Pneumonia"] == pytest.approx(0.5)
+            assert result["probabilidades"]["Effusion"] == pytest.approx(
+                torch.sigmoid(torch.tensor(2.0)).item()
+            )
+            assert result["hallazgos"][0]["detectado"] is True
+            assert result["hallazgos"][1]["detectado"] is False
+            assert result["es_fine_tuned"] is True
+        finally:
+            (
+                DetectorTorax._transform,
+                DetectorTorax._labels_es,
+                DetectorTorax._thresholds,
+                DetectorTorax._is_finetuned,
+                DetectorTorax._model_name,
+            ) = previous
 
 
 class TestDiagnosticoAPI:
@@ -126,6 +181,8 @@ class TestDiagnosticoAPI:
         assert data["estado_procesamiento"] == "procesado"
 
     def test_gradcam_view(self, auth_client, estudio_con_imagen):
+        from django.core.cache import cache
+        cache.clear()
         with patch("diagnostico.views.DetectorTorax.cargar") as mock_cargar, \
              patch("diagnostico.gradcam.GeneradorGradCAM.calcular") as mock_calcular, \
              patch("diagnostico.gradcam.GeneradorGradCAM.get_centroide") as mock_centroide, \
@@ -144,12 +201,19 @@ class TestDiagnosticoAPI:
             mock_solo.return_value = "data:image/png;base64,mock"
 
             url = reverse("gradcam")
-            with patch("estudios.utils.leer_dicom", return_value=SimpleNamespace(pixel_array=np.zeros((64,64)), BitsStored=8)), patch("diagnostico.services.DetectorTorax._preprocesar", return_value=torch.zeros(1,1,64,64)):
+            with patch("estudios.utils.leer_dicom", return_value=SimpleNamespace()), patch("estudios.utils.dicom_display_pixels", return_value=np.zeros((64,64), dtype=np.uint8)), patch("diagnostico.services.DetectorTorax._preprocesar", return_value=torch.zeros(1,1,64,64)):
                 response = auth_client.get(url, {"imagen_id": estudio_con_imagen.id})
             assert response.status_code == status.HTTP_200_OK
             data = response.json()
             assert "overlay" in data
             assert "centroide" in data
+            assert data["cache"] is False
+
+            # Mismo estudio y patología: no debe volver a ejecutar Grad-CAM.
+            cached_response = auth_client.get(url, {"imagen_id": estudio_con_imagen.id})
+            assert cached_response.status_code == status.HTTP_200_OK
+            assert cached_response.json()["cache"] is True
+            assert mock_calcular.call_count == 1
 
     def test_niveles_clinicos_config(self, auth_client):
         url = reverse("niveles-clinicos")

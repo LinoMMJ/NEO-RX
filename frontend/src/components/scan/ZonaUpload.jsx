@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import { UploadCloud, FileCheck } from 'lucide-react'
 
-export default function ZonaUpload({ onArchivo, archivo }) {
+export default function ZonaUpload({ onArchivo, archivo, previewUrl, previewLoading = false, title, helpText, ariaLabel }) {
   const inputRef = useRef(null)
   const [drag, setDrag] = useState(false)
 
@@ -30,22 +30,30 @@ export default function ZonaUpload({ onArchivo, archivo }) {
       onDragLeave={() => setDrag(false)}
       onDrop={handleDrop}
       whileHover={{ scale: 1.005 }}
-      aria-label="Zona de carga de archivo DICOM"
+      aria-label={ariaLabel || 'Zona de carga de radiografía'}
     >
       <input
         ref={inputRef}
         type="file"
-        accept=".dcm,.dicom,.png,.jpg,.jpeg"
+        accept=".dcm,.dicom,.png,.jpg,.jpeg,.webp"
         className="hidden"
         onChange={(e) => e.target.files[0] && onArchivo(e.target.files[0])}
       />
 
       {archivo ? (
         <>
-          <FileCheck className="w-12 h-12 text-success mb-3" />
+          {previewUrl ? (
+            <img
+              src={previewUrl}
+              alt="Vista previa de la radiografía seleccionada"
+              className="mb-3 h-24 w-24 rounded-lg border border-success/25 bg-slate-950 object-contain"
+            />
+          ) : (
+            <FileCheck className="w-12 h-12 text-success mb-3" />
+          )}
           <p className="font-heading font-semibold text-navy text-base">{archivo.name}</p>
           <p className="font-body text-sm text-slate-500 mt-1">
-            {(archivo.size / 1024).toFixed(0)} KB · listo para análisis
+            {(archivo.size / 1024).toFixed(0)} KB · {previewLoading ? 'generando vista previa…' : 'pendiente de validación'}
           </p>
           <button
             className="mt-3 text-xs text-slate-400 hover:text-danger underline"
@@ -74,14 +82,13 @@ export default function ZonaUpload({ onArchivo, archivo }) {
             </motion.div>
           </div>
           <p className="font-heading font-semibold text-navy text-base">
-            {drag ? 'Suelta el archivo aquí' : 'Arrastra tu archivo o haz clic'}
+            {drag ? 'Suelta el archivo aquí' : (title || 'Arrastra tu archivo o haz clic')}
           </p>
           <p className="font-body text-sm text-slate-400 mt-1 text-center">
-            Formatos aceptados: .dcm · .dicom · .png · .jpg
+            Formatos aceptados: DICOM · PNG · JPG · WEBP
           </p>
           <p className="font-body text-xs text-slate-400 mt-4 text-center max-w-xs">
-            Las imágenes se vinculan al paciente seleccionado.
-            El análisis automatizado requiere revisión médica.
+            {helpText || 'Primero verificamos que sea una radiografía y determinamos la región. Solo las radiografías de tórax pasan al análisis CNN.'}
           </p>
         </>
       )}

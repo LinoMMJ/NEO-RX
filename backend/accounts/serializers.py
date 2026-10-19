@@ -11,6 +11,7 @@ from rest_framework_simplejwt.utils import get_md5_hash_password
 from rest_framework_simplejwt.token_blacklist.models import OutstandingToken
 from datetime import datetime, timezone as datetime_timezone
 from .models import CustomUser
+from neorx.validation import clean_plain_text
 
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
@@ -78,6 +79,7 @@ class CustomUserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=False)
 
     def validate_email(self, value):
+        value = value.strip().casefold()
         if value:
             matches = CustomUser.objects.filter(email__iexact=value)
             if self.instance:
@@ -85,6 +87,12 @@ class CustomUserSerializer(serializers.ModelSerializer):
             if matches.exists():
                 raise serializers.ValidationError('Ese correo ya está asignado a otro usuario.')
         return value
+
+    def validate_first_name(self, value):
+        return clean_plain_text(value, max_length=150, field_name="nombres")
+
+    def validate_last_name(self, value):
+        return clean_plain_text(value, max_length=150, field_name="apellidos")
 
     def validate(self, attrs):
         from django.contrib.auth.password_validation import validate_password

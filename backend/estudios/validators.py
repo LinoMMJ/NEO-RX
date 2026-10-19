@@ -9,6 +9,8 @@ from PIL import Image
 from django.conf import settings
 from django.core.exceptions import ValidationError
 
+from .utils import dicom_pixel_array_2d
+
 
 # Configuración por defecto (sobrescribible via settings)
 DEFAULT_MAX_FILE_SIZE = getattr(settings, 'IMAGE_MAX_FILE_SIZE', 50 * 1024 * 1024)  # 50MB
@@ -99,20 +101,16 @@ def validate_dicom_integrity(file_obj) -> tuple:
         ds = pydicom.dcmread(file_obj, force=True)
         file_obj.seek(0)
 
-        # Validaciones básicas de estructura DICOM
-        required_tags = ['SOPClassUID', 'SOPInstanceUID', 'StudyInstanceUID', 'Modality', 'Rows', 'Columns', 'PixelData']
+        # Para procesar la imagen solo son imprescindibles sus dimensiones y píxeles.
+        # Algunos visores/exportadores omiten UIDs o Modality aunque el DICOM sea legible.
+        required_tags = ['Rows', 'Columns', 'PixelData']
         missing = [tag for tag in required_tags if not hasattr(ds, tag) or not getattr(ds, tag, None)]
         if missing:
-            return None, f"DICOM incompleto: faltan tags requeridos: {', '.join(missing)}"
+            return None, f"DICOM incompleto: faltan datos de imagen: {', '.join(missing)}"
 
-        # Verificar que es imagen médica
-        if getattr(ds, 'Modality', '') not in ['CR', 'DX', 'RF', 'XA', 'XC']:
-            # Advertencia pero no error - algunos equipos usan otros códigos
-            pass
-
-        pixels = ds.pixel_array
-        if pixels.ndim != 2 or pixels.size == 0:
-            return None, "Se requiere una imagen DICOM monocromática de un solo cuadro."
+        pixels = dicom_pixel_array_2d(ds)
+        if pixels.size == 0:
+            return None, "El DICOM no contiene píxeles utilizables."
         return ds, None
     except pydicom.errors.InvalidDicomError as e:
         return None, f"Archivo DICOM inválido: {str(e)}"
@@ -223,6 +221,17 @@ def validate_file_comprehensive(file_obj, file_type: str = 'auto') -> dict:
             result['errors'].append(error)
         else:
             result['dataset'] = ds
+            optional_tags = ['SOPInstanceUID', 'StudyInstanceUID', 'Modality']
+            missing_optional = [tag for tag in optional_tags if not getattr(ds, tag, None)]
+            if missing_optional:
+                result['warnings'].append(
+                    "Metadatos DICOM opcionales ausentes: " + ", ".join(missing_optional)
+                )
+            frames = int(getattr(ds, 'NumberOfFrames', 1) or 1)
+            if frames > 1:
+                result['warnings'].append(
+                    f"DICOM multicuadro ({frames}); se analizará el primer cuadro."
+                )
             # Extraer metadatos útiles
             result['metadata'] = {
                 'PatientName': str(getattr(ds, 'PatientName', '')),
