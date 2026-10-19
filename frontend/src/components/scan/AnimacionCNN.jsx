@@ -18,7 +18,7 @@ const ESTADOS = [
   { t: 2600, msg: 'Normalizando imagen al rango [-1024, 1024]…' },
   { t: 3800, msg: 'Extrayendo características con la red convolucional…' },
   { t: 5200, msg: 'Combinando patrones radiográficos…' },
-  { t: 6800, msg: 'Calculando probabilidades para 12 patologías neumológicas…' },
+  { t: 6800, msg: 'Calculando puntuaciones para los hallazgos configurados…' },
 ]
 
 export default function AnimacionCNN({ imagenPreview, progreso = 0, completado = false }) {

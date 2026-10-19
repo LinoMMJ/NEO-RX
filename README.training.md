@@ -1,5 +1,10 @@
 # Entrenamiento de Neo RX V1.3.8 en Kaggle
 
+> Para la nueva versión enfocada en cinco hallazgos, usa
+> [`docs/entrenamiento-focused5.md`](docs/entrenamiento-focused5.md) y
+> `training/config.focused5.kaggle.yaml`. El flujo de abajo documenta el modelo
+> histórico de 12 clases.
+
 Este pipeline ajusta el ResNet-50 preentrenado de `torchxrayvision` con NIH ChestX-ray14. El flujo está preparado para usar el nivel gratuito de Kaggle, leer las imágenes directamente desde `/kaggle/input` y guardar todo resultado en `/kaggle/working`.
 
 > El modelo es apoyo a la interpretación radiológica. Las métricas reales quedan pendientes hasta ejecutar el entrenamiento completo y evaluar el conjunto de prueba.

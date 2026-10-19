@@ -17,6 +17,8 @@ from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms as T
 
+from training.configuration import get_target_labels
+
 IMAGE_COLUMN = "Image Index"
 LABEL_COLUMN = "Finding Labels"
 PATIENT_COLUMN = "Patient ID"
@@ -203,7 +205,7 @@ def get_dataloaders(
     manifest_value = cfg.get("data", {}).get("manifest")
     manifest_path = Path(manifest_value) if manifest_value else None
     frame = _load_records(Path(data_dir), manifest_path)
-    labels = cfg.get("pulmonary_labels", cfg.get("nih_labels", []))
+    labels = get_target_labels(cfg)
     train = NIHDataset(_select_split(frame, splits["train"]), labels, build_train_transform(cfg))
     val = NIHDataset(_select_split(frame, splits["val"]), labels, build_eval_transform())
     test = NIHDataset(_select_split(frame, splits["test"]), labels, build_eval_transform())

@@ -21,6 +21,7 @@ from sklearn.metrics import roc_auc_score
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from training.dataset import get_dataloaders
+from training.configuration import get_target_labels
 from training.model import load_finetuned_model
 
 
@@ -158,7 +159,7 @@ def main():
     args = parse_args()
     cfg = load_config(args.config)
     device = get_device(args.device)
-    labels = list(cfg["pulmonary_labels"])
+    labels = get_target_labels(cfg)
 
     print(f"Device: {device}")
     print(f"Finetuned checkpoint: {args.finetuned_checkpoint}")

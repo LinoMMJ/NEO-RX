@@ -40,6 +40,7 @@ from sklearn.metrics import (
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from training.dataset import get_dataloaders
+from training.configuration import get_target_labels
 from training.model import load_finetuned_model, get_thresholds_from_checkpoint
 
 
@@ -294,6 +295,31 @@ def save_classification_report_json(
         json.dump(convert(output_data), f, indent=2)
 
 
+def decision_summary(
+    targets: np.ndarray,
+    probs: np.ndarray,
+    labels: List[str],
+    thresholds: Dict[str, float],
+) -> Dict:
+    """Summarize how ambiguous the thresholded output is per image."""
+    threshold_array = np.asarray([thresholds[label] for label in labels])
+    predictions = probs >= threshold_array
+    detected_per_image = predictions.sum(axis=1)
+    false_positives_per_image = (predictions & (targets == 0)).sum(axis=1)
+    n_samples = max(1, len(targets))
+    return {
+        "test_samples": int(len(targets)),
+        "mean_detected_labels_per_image": float(detected_per_image.mean()),
+        "mean_false_positive_labels_per_image": float(false_positives_per_image.mean()),
+        "images_with_no_detection": int((detected_per_image == 0).sum()),
+        "images_with_one_detection": int((detected_per_image == 1).sum()),
+        "images_with_multiple_detections": int((detected_per_image > 1).sum()),
+        "multiple_detection_rate": float((detected_per_image > 1).sum() / n_samples),
+        "exact_match_rate": float((predictions == targets.astype(bool)).all(axis=1).sum() / n_samples),
+        "note": "Thresholds were selected on validation; this summary is computed once on test.",
+    }
+
+
 def plot_roc_curves(
     targets: np.ndarray,
     probs: np.ndarray,
@@ -486,6 +512,12 @@ def main():
     # Load model
     model = load_finetuned_model(args.checkpoint).to(device)
     labels = model.pathologies
+    configured_labels = get_target_labels(cfg)
+    if configured_labels != labels:
+        raise ValueError(
+            "Config/checkpoint label mismatch: "
+            f"config={configured_labels}, checkpoint={labels}"
+        )
     print(f"Model loaded: {len(labels)} classes")
     print(f"Pathologies: {labels}")
 
@@ -567,6 +599,12 @@ def main():
         len(targets), str(args.checkpoint), report_json
     )
     print(f"Classification report saved to {report_json}")
+
+    ambiguity = decision_summary(targets, probs, labels, thresholds)
+    ambiguity_path = output_dir / "decision_summary.json"
+    with open(ambiguity_path, "w", encoding="utf-8") as handle:
+        json.dump(ambiguity, handle, indent=2, ensure_ascii=False)
+    print(f"Decision summary saved to {ambiguity_path}")
 
     # Plots
     if args.plot:

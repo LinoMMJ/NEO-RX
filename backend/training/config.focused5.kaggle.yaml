@@ -1,0 +1,67 @@
+# Neo RX focused-v2: five clinically distinct target findings.
+# This remains MULTI-LABEL: more than one finding may be present in one image.
+
+data:
+  data_dir: "/kaggle/input/nih-chest-xrays"
+  splits_json: "/kaggle/working/manifests-focused5/splits.json"
+  manifest: "/kaggle/working/manifests-focused5/clean_manifest.csv"
+  processed_dir: "/kaggle/working/processed-focused5"
+
+model:
+  base_weights: "resnet50-res512-all"
+  num_classes: 5
+  checkpoint_dir: "/kaggle/working/checkpoints-focused5"
+  checkpoint_name: "neorx_focused5_resnet50.pt"
+
+train:
+  epochs_head: 3
+  epochs_finetune: 12
+  lr_head: 1.0e-3
+  lr_finetune: 1.0e-4
+  weight_decay: 1.0e-4
+  batch_size: 16
+  num_workers: 4
+  mixed_precision: true
+  early_stopping_patience: 5
+  grad_clip: 1.0
+  seed: 42
+  log_dir: "/kaggle/working/runs-focused5"
+  use_pos_weight: true
+  # Rare findings are better compared with precision-recall than ROC alone.
+  selection_metric: "macro_average_precision"
+
+augmentation:
+  enabled: true
+  rotation_degrees: 5
+  scale_range: 0.10
+  brightness: 0.15
+  contrast: 0.15
+  gaussian_noise_std: 0.01
+  horizontal_flip: false
+
+# The old model used Youden J. focused-v2 instead asks validation for a high
+# precision operating point, reducing simultaneous false-positive findings.
+threshold:
+  method: "fixed_precision"
+  target_precision: 0.85
+  min_threshold: 0.05
+  max_threshold: 0.95
+
+experiment:
+  name: "neorx_focused5_v2"
+  description: "Five-target multi-label model with precision-oriented thresholds"
+  tags: ["focused5", "multi-label", "resnet50", "nih-chestxray14"]
+
+target_labels:
+  - "Emphysema"
+  - "Edema"
+  - "Effusion"
+  - "Mass"
+  - "Pneumothorax"
+
+labels_es:
+  Emphysema: "Enfisema"
+  Edema: "Edema pulmonar"
+  Effusion: "Derrame pleural"
+  Mass: "Masa pulmonar"
+  Pneumothorax: "Neumotórax"

@@ -5,7 +5,7 @@ Optimizes decision thresholds on VALIDATION set only.
 Never uses TEST set for threshold selection.
 
 Method: Youden's J statistic (sensitivity + specificity - 1)
-Alternative methods can be added (F1-max, fixed sensitivity, etc.)
+Supports Youden J, F1-max, fixed sensitivity and fixed precision.
 
 All results are PENDIENTE DE EJECUCIÓN EXPERIMENTAL.
 """
@@ -43,17 +43,21 @@ class ThresholdOptimizer:
         self,
         method: str = "youden_j",
         min_threshold: float = 0.05,
-        max_threshold: float = 0.95
+        max_threshold: float = 0.95,
+        target_precision: float = 0.85,
     ):
         """
         Args:
-            method: "youden_j" (default), "f1_max", "fixed_sensitivity"
+            method: "youden_j", "f1_max", "fixed_sensitivity", "fixed_precision"
             min_threshold: Minimum threshold to consider
             max_threshold: Maximum threshold to consider
         """
         self.method = method
         self.min_threshold = min_threshold
         self.max_threshold = max_threshold
+        if not 0 < target_precision <= 1:
+            raise ValueError("target_precision must be in (0, 1]")
+        self.target_precision = target_precision
 
     def optimize(
         self,
@@ -103,6 +107,8 @@ class ThresholdOptimizer:
             return self._f1_max_threshold(y_true, y_scores)
         elif self.method == "fixed_sensitivity":
             return self._fixed_sensitivity_threshold(y_true, y_scores, target_sensitivity=0.90)
+        elif self.method == "fixed_precision":
+            return self._fixed_precision_threshold(y_true, y_scores, self.target_precision)
         else:
             raise ValueError(f"Unknown threshold method: {self.method}")
 
@@ -178,6 +184,37 @@ class ThresholdOptimizer:
             best_idx = np.where(sensitivity_mask)[0][best_idx]
 
         return float(valid_thresholds[best_idx])
+
+    def _fixed_precision_threshold(
+        self,
+        y_true: np.ndarray,
+        y_scores: np.ndarray,
+        target_precision: float,
+    ) -> float:
+        """Maximize recall among thresholds that meet a precision floor.
+
+        When validation cannot support the requested precision, use the maximum
+        allowed threshold. This conservative fallback avoids silently replacing
+        a precision objective with a high-false-positive operating point.
+        """
+        precision, recall, thresholds = precision_recall_curve(y_true, y_scores)
+        if not len(thresholds):
+            return self.max_threshold
+        precision = precision[:-1]
+        recall = recall[:-1]
+        valid = (
+            (thresholds >= self.min_threshold)
+            & (thresholds <= self.max_threshold)
+            & (precision >= target_precision)
+        )
+        if not valid.any():
+            return self.max_threshold
+
+        indices = np.where(valid)[0]
+        # Highest recall first; ties prefer greater precision and then a higher
+        # threshold, producing the more conservative decision rule.
+        best = max(indices, key=lambda i: (recall[i], precision[i], thresholds[i]))
+        return float(thresholds[best])
 
     def get_detailed_results(
         self,

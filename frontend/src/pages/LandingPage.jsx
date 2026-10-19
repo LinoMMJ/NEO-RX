@@ -29,8 +29,8 @@ const FEATURES = [
   },
   {
     icon: LungIcon,
-    title: '12 patologías neumológicas',
-    text: 'Neumonía, consolidaciones, nódulos, derrames y más, con probabilidades calibradas y mapas Grad-CAM.',
+    title: 'Hallazgos neumológicos configurables',
+    text: 'Puntuaciones por hallazgo, umbrales validados y mapas Grad-CAM como apoyo a la revisión profesional.',
   },
   {
     icon: FileText,

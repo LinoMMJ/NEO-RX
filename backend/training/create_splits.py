@@ -7,7 +7,10 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import yaml
 from sklearn.model_selection import train_test_split
+
+from training.configuration import get_target_labels
 
 PULMONARY_LABELS = [
     "Atelectasis", "Consolidation", "Edema", "Emphysema", "Effusion", "Fibrosis",
@@ -24,13 +27,45 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Create leakage-safe NIH patient splits")
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
-    parser.add_argument("--labels", choices=("pulmonary", "nih"), default="pulmonary")
+    parser.add_argument(
+        "--labels",
+        default="pulmonary",
+        help="pulmonary, nih, or a comma-separated custom label list",
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        help="Read target_labels from a training YAML config (overrides --labels)",
+    )
     parser.add_argument("--train-ratio", type=float, default=0.70)
     parser.add_argument("--val-ratio", type=float, default=0.15)
     parser.add_argument("--test-ratio", type=float, default=0.15)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--attempts", type=int, default=64)
+    parser.add_argument(
+        "--min-positives-per-label",
+        type=int,
+        default=1,
+        help="Required positives for every label in each split (default: 1)",
+    )
     return parser.parse_args()
+
+
+def resolve_labels(labels_arg: str, config_path: Path | None = None) -> list[str]:
+    if config_path:
+        with open(config_path, encoding="utf-8") as handle:
+            return get_target_labels(yaml.safe_load(handle))
+    if labels_arg == "pulmonary":
+        return list(PULMONARY_LABELS)
+    if labels_arg == "nih":
+        return list(NIH_LABELS)
+    labels = [label.strip() for label in labels_arg.split(",") if label.strip()]
+    if not labels or len(set(labels)) != len(labels):
+        raise ValueError("Custom --labels must be a unique comma-separated list")
+    unknown = sorted(set(labels) - set(NIH_LABELS))
+    if unknown:
+        raise ValueError(f"Unknown NIH labels: {unknown}")
+    return labels
 
 
 def label_matrix(frame: pd.DataFrame, labels: list[str]) -> np.ndarray:
@@ -54,7 +89,7 @@ def split_for_seed(frame, seed, train_ratio, val_ratio):
     return frame["Patient ID"].map(assignment)
 
 
-def candidate_score(frame, assignment, labels):
+def candidate_score(frame, assignment, labels, min_positives_per_label=1):
     overall = label_matrix(frame, labels).mean(axis=0)
     score, counts = 0.0, {}
     for name in ("train", "val", "test"):
@@ -62,7 +97,7 @@ def candidate_score(frame, assignment, labels):
         matrix = label_matrix(part, labels)
         positive = matrix.sum(axis=0)
         counts[name] = positive
-        if len(part) == 0 or np.any(positive == 0):
+        if len(part) == 0 or np.any(positive < min_positives_per_label):
             return float("inf"), counts
         score += float(np.abs(matrix.mean(axis=0) - overall).sum())
     return score, counts
@@ -77,16 +112,21 @@ def main():
     missing = sorted(required - set(frame.columns))
     if missing:
         raise ValueError(f"Manifest is missing columns: {missing}")
-    labels = PULMONARY_LABELS if args.labels == "pulmonary" else NIH_LABELS
+    labels = resolve_labels(args.labels, args.config)
     best = None
     for offset in range(max(1, args.attempts)):
         seed = args.seed + offset
         assignment = split_for_seed(frame, seed, args.train_ratio, args.val_ratio)
-        score, counts = candidate_score(frame, assignment, labels)
+        score, counts = candidate_score(
+            frame, assignment, labels, args.min_positives_per_label
+        )
         if best is None or score < best[0]:
             best = (score, seed, assignment, counts)
     if best is None or not np.isfinite(best[0]):
-        raise RuntimeError("Could not create splits containing positives for every selected label")
+        raise RuntimeError(
+            "Could not create patient-level splits with at least "
+            f"{args.min_positives_per_label} positives for every selected label"
+        )
     score, selected_seed, assignment, counts = best
     output = args.output_dir.resolve()
     output.mkdir(parents=True, exist_ok=True)
@@ -106,6 +146,7 @@ def main():
         "seed": selected_seed,
         "distribution_score": score,
         "labels": labels,
+        "minimum_positives_per_label": args.min_positives_per_label,
         "splits": {
             name: {
                 "images": len(splits[name]),

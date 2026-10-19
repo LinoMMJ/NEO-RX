@@ -36,6 +36,7 @@ from torch.utils.tensorboard import SummaryWriter
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from training.dataset import get_dataloaders
+from training.configuration import get_target_labels
 from training.model import (
     build_model,
     count_trainable_params,
@@ -44,7 +45,7 @@ from training.model import (
     set_head_only,
     unfreeze_partial,
 )
-from training.threshold_optimizer import ThresholdOptimizer
+from training.threshold_optimizer import ThresholdOptimizer, save_thresholds_csv
 
 
 def parse_args():
@@ -116,6 +117,23 @@ def compute_auc_scores(targets: torch.Tensor, probs: torch.Tensor) -> Tuple[List
     valid = [a for a in aucs if not (isinstance(a, float) and a != a)]  # filter NaN
     macro = sum(valid) / len(valid) if valid else 0.0
     return aucs, macro
+
+
+def compute_average_precision_scores(
+    targets: np.ndarray, probs: np.ndarray
+) -> Tuple[List[float], float]:
+    """Compute PR-AUC per class; more informative for rare findings than ROC-AUC."""
+    from sklearn.metrics import average_precision_score
+
+    scores = []
+    for index in range(targets.shape[1]):
+        truth = targets[:, index]
+        if truth.sum() == 0 or truth.sum() == len(truth):
+            scores.append(float("nan"))
+        else:
+            scores.append(float(average_precision_score(truth, probs[:, index])))
+    valid = [score for score in scores if not np.isnan(score)]
+    return scores, float(np.mean(valid)) if valid else 0.0
 
 
 def validate(
@@ -321,7 +339,7 @@ def main():
         actual = len(train_loader.dataset) + len(val_loader.dataset)
         print(f"PIPELINE TEST: {actual:,} train+validation samples loaded")
 
-    labels = cfg.get("pulmonary_labels", cfg.get("nih_labels", []))
+    labels = get_target_labels(cfg)
     num_classes = len(labels)
     model = build_model(cfg).to(device)
     print(f"Training with {num_classes} classes: {labels}")
@@ -358,6 +376,16 @@ def main():
     resume_phase = saved_state.get("phase", resume.get("extra", {}).get("phase", "head") if resume else "head")
     next_epoch = int(saved_state.get("next_epoch", resume.get("extra", {}).get("epoch", -1) + 1 if resume else 0))
     best_macro_auc = float(saved_state.get("best_macro_auc", resume.get("metrics", {}).get("macro_auc", 0.0) if resume else 0.0))
+    selection_metric = cfg["train"].get("selection_metric", "macro_auc")
+    if selection_metric not in {"macro_auc", "macro_average_precision"}:
+        raise ValueError("train.selection_metric must be macro_auc or macro_average_precision")
+    resume_metrics = resume.get("metrics", {}) if resume else {}
+    default_selection = (
+        resume_metrics.get("macro_average_precision", 0.0)
+        if selection_metric == "macro_average_precision"
+        else resume_metrics.get("macro_auc", 0.0)
+    )
+    best_selection_score = float(saved_state.get("best_selection_score", default_selection))
     patience_counter = int(saved_state.get("patience_counter", 0))
     best_thresholds = resume.get("thresholds") if resume else None
     _restore_rng_state(saved_state.get("rng_state"))
@@ -370,7 +398,7 @@ def main():
         print("All configured epochs were already completed; rebuilding final checkpoint only.")
 
     def run_phase(phase: str, start: int, stop: int, learning_rate: float, patience: int):
-        nonlocal best_macro_auc, best_thresholds, patience_counter, next_epoch
+        nonlocal best_macro_auc, best_selection_score, best_thresholds, patience_counter, next_epoch
         if start >= stop:
             return
         if phase == "head":
@@ -405,10 +433,15 @@ def main():
             val_loss, val_aucs, val_macro_auc, val_targets, val_probs = validate(
                 model, val_loader, device, use_amp, criterion
             )
+            val_aps, val_macro_ap = compute_average_precision_scores(val_targets, val_probs)
+            selection_score = (
+                val_macro_ap if selection_metric == "macro_average_precision" else val_macro_auc
+            )
             current_lr = optimizer.param_groups[0]["lr"]
             writer.add_scalar("train/epoch_loss", train_loss, epoch)
             writer.add_scalar("val/epoch_loss", val_loss, epoch)
             writer.add_scalar("val/macro_auc", val_macro_auc, epoch)
+            writer.add_scalar("val/macro_average_precision", val_macro_ap, epoch)
             for index, auc in enumerate(val_aucs):
                 if not np.isnan(auc):
                     writer.add_scalar(f"val/auc_{labels[index]}", auc, epoch)
@@ -416,9 +449,10 @@ def main():
                 history_csv, epoch, phase, train_loss, val_loss,
                 val_aucs, val_macro_auc, labels, current_lr,
             )
-            scheduler.step(val_macro_auc)
-            improved = val_macro_auc > best_macro_auc
+            scheduler.step(selection_score)
+            improved = selection_score > best_selection_score
             if improved:
+                best_selection_score = selection_score
                 best_macro_auc = val_macro_auc
                 patience_counter = 0
                 threshold_cfg = cfg.get("threshold", {})
@@ -426,11 +460,24 @@ def main():
                     method=threshold_cfg.get("method", "youden_j"),
                     min_threshold=threshold_cfg.get("min_threshold", 0.05),
                     max_threshold=threshold_cfg.get("max_threshold", 0.95),
+                    target_precision=threshold_cfg.get("target_precision", 0.85),
                 )
-                best_thresholds = optimizer_threshold.optimize(val_targets, val_probs, labels)
+                threshold_results = optimizer_threshold.get_detailed_results(
+                    val_targets, val_probs, labels
+                )
+                best_thresholds = [threshold_results[label].threshold for label in labels]
+                save_thresholds_csv(threshold_results, run_dir / "thresholds_validation.csv")
                 save_checkpoint(
                     best_path, model, labels, cfg["labels_es"],
-                    metrics={"macro_auc": val_macro_auc, "per_class_auc": val_aucs, "val_loss": val_loss},
+                    metrics={
+                        "macro_auc": val_macro_auc,
+                        "per_class_auc": val_aucs,
+                        "macro_average_precision": val_macro_ap,
+                        "per_class_average_precision": val_aps,
+                        "selection_metric": selection_metric,
+                        "selection_score": selection_score,
+                        "val_loss": val_loss,
+                    },
                     extra={"epoch": epoch, "phase": phase, "config": cfg},
                     thresholds=best_thresholds,
                     pos_weight=pos_weight.detach().cpu().tolist() if pos_weight is not None else None,
@@ -442,6 +489,8 @@ def main():
                 "phase": phase,
                 "next_epoch": next_epoch,
                 "best_macro_auc": best_macro_auc,
+                "best_selection_score": best_selection_score,
+                "selection_metric": selection_metric,
                 "patience_counter": patience_counter,
                 "optimizer_state": optimizer.state_dict(),
                 "scheduler_state": scheduler.state_dict(),
@@ -450,7 +499,15 @@ def main():
             }
             save_checkpoint(
                 last_path, model, labels, cfg["labels_es"],
-                metrics={"macro_auc": val_macro_auc, "per_class_auc": val_aucs, "val_loss": val_loss},
+                metrics={
+                    "macro_auc": val_macro_auc,
+                    "per_class_auc": val_aucs,
+                    "macro_average_precision": val_macro_ap,
+                    "per_class_average_precision": val_aps,
+                    "selection_metric": selection_metric,
+                    "selection_score": selection_score,
+                    "val_loss": val_loss,
+                },
                 extra={"epoch": epoch, "phase": phase, "config": cfg},
                 thresholds=best_thresholds,
                 pos_weight=pos_weight.detach().cpu().tolist() if pos_weight is not None else None,
@@ -461,6 +518,8 @@ def main():
                 "last_completed_epoch": epoch,
                 "next_epoch": next_epoch,
                 "best_macro_auc": best_macro_auc,
+                "best_selection_score": best_selection_score,
+                "selection_metric": selection_metric,
                 "patience_counter": patience_counter,
                 "safe_to_resume": True,
                 "last_checkpoint": str(last_path),
@@ -471,7 +530,8 @@ def main():
             print(
                 f"Epoch {epoch}/{stop - 1} {phase} | train={train_loss:.4f} "
                 f"val={val_loss:.4f} macro_AUC={val_macro_auc:.4f} "
-                f"time={time.time() - started:.1f}s best={best_macro_auc:.4f}"
+                f"macro_AP={val_macro_ap:.4f} time={time.time() - started:.1f}s "
+                f"best_{selection_metric}={best_selection_score:.4f}"
             )
             if patience_counter >= patience:
                 print(f"Early stopping in {phase} after epoch {epoch}")
@@ -498,7 +558,11 @@ def main():
         best_metrics = best_checkpoint.get("metrics", {})
         best_thresholds = best_checkpoint.get("thresholds", best_thresholds)
     else:
-        best_metrics = {"macro_auc": best_macro_auc}
+        best_metrics = {
+            "macro_auc": best_macro_auc,
+            "selection_metric": selection_metric,
+            "selection_score": best_selection_score,
+        }
 
     final_path = checkpoint_dir / cfg["model"]["checkpoint_name"]
     save_checkpoint(
@@ -508,7 +572,10 @@ def main():
         pos_weight=pos_weight.detach().cpu().tolist() if pos_weight is not None else None,
     )
     writer.close()
-    print(f"Training complete. Best macro AUC: {best_macro_auc:.4f}")
+    print(
+        f"Training complete. Best {selection_metric}: {best_selection_score:.4f}; "
+        f"macro AUC at selected checkpoint: {best_macro_auc:.4f}"
+    )
     print(f"Final checkpoint: {final_path}")
 
 

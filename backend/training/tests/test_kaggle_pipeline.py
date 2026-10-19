@@ -5,7 +5,8 @@ import pandas as pd
 import torch
 from PIL import Image
 
-from training.create_splits import PULMONARY_LABELS, candidate_score, split_for_seed
+from training.configuration import get_target_labels
+from training.create_splits import PULMONARY_LABELS, candidate_score, resolve_labels, split_for_seed
 from training.dataset import (
     IMAGE_COLUMN, _limit_splits, _load_records, _select_split,
     build_eval_transform, build_train_transform,
@@ -115,6 +116,53 @@ def test_patient_split_is_deterministic_and_has_no_leakage():
 def test_threshold_optimizer_imports():
     assert ThresholdOptimizer is not None
     assert callable(save_thresholds_csv)
+
+
+def test_focused_labels_are_configurable_and_validated():
+    config = {
+        "model": {"num_classes": 2},
+        "target_labels": ["Effusion", "Pneumothorax"],
+    }
+    assert get_target_labels(config) == ["Effusion", "Pneumothorax"]
+    assert resolve_labels("Effusion,Pneumothorax") == ["Effusion", "Pneumothorax"]
+
+    config["model"]["num_classes"] = 3
+    with np.testing.assert_raises(ValueError):
+        get_target_labels(config)
+
+
+def test_fixed_precision_threshold_prefers_recall_with_precision_floor():
+    truth = np.asarray([1, 1, 0, 0, 0])
+    scores = np.asarray([0.95, 0.80, 0.75, 0.30, 0.10])
+    optimizer = ThresholdOptimizer(method="fixed_precision", target_precision=0.80)
+    threshold = optimizer.optimize(truth[:, None], scores[:, None], ["Finding"])[0]
+    assert threshold == 0.80
+
+
+def test_fixed_precision_uses_conservative_fallback_when_target_is_impossible():
+    truth = np.asarray([1, 0, 0, 0])
+    scores = np.asarray([0.10, 0.90, 0.80, 0.70])
+    optimizer = ThresholdOptimizer(
+        method="fixed_precision", target_precision=1.0, max_threshold=0.85
+    )
+    threshold = optimizer.optimize(truth[:, None], scores[:, None], ["Finding"])[0]
+    assert threshold == 0.85
+
+
+def test_decision_summary_measures_multiple_and_false_positive_findings():
+    from training.evaluate import decision_summary
+
+    targets = np.asarray([[1, 0], [0, 0]])
+    scores = np.asarray([[0.90, 0.80], [0.20, 0.10]])
+    summary = decision_summary(
+        targets,
+        scores,
+        ["Effusion", "Pneumothorax"],
+        {"Effusion": 0.50, "Pneumothorax": 0.50},
+    )
+    assert summary["images_with_multiple_detections"] == 1
+    assert summary["multiple_detection_rate"] == 0.5
+    assert summary["mean_false_positive_labels_per_image"] == 0.5
 
 
 def test_training_entrypoints_import():

@@ -16,6 +16,8 @@ import torch
 import torch.nn as nn
 import torchxrayvision as xrv
 
+from training.configuration import get_target_labels
+
 
 # Default NIH labels (for reference/backward compatibility)
 NIH_LABELS: List[str] = [
@@ -68,7 +70,8 @@ def build_model(cfg: Dict) -> xrv.models.ResNet:
             - model.op_norm = nn.Sigmoid() (preserved from xrv)
     """
     base_weights = cfg["model"]["base_weights"]
-    num_classes = cfg["model"]["num_classes"]
+    labels = get_target_labels(cfg)
+    num_classes = len(labels)
 
     # Load pretrained xrv model (includes op_norm=Sigmoid in forward)
     model = xrv.models.ResNet(weights=base_weights)
@@ -79,7 +82,6 @@ def build_model(cfg: Dict) -> xrv.models.ResNet:
     model.model.fc = nn.Linear(in_features, num_classes)
 
     # Set pathologies list from config (or default to pulmonary)
-    labels = cfg.get("pulmonary_labels", cfg.get("nih_labels", PULMONARY_LABELS))
     model.pathologies = labels.copy()
 
     return model
