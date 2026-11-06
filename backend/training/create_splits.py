@@ -11,6 +11,7 @@ import yaml
 from sklearn.model_selection import train_test_split
 
 from training.configuration import get_target_labels
+from diagnostico.priority_policy import expanded_labels, CATEGORY_HEADS
 
 PULMONARY_LABELS = [
     "Atelectasis", "Consolidation", "Edema", "Emphysema", "Effusion", "Fibrosis",
@@ -62,14 +63,14 @@ def resolve_labels(labels_arg: str, config_path: Path | None = None) -> list[str
     labels = [label.strip() for label in labels_arg.split(",") if label.strip()]
     if not labels or len(set(labels)) != len(labels):
         raise ValueError("Custom --labels must be a unique comma-separated list")
-    unknown = sorted(set(labels) - set(NIH_LABELS))
+    unknown = sorted(set(labels) - set(NIH_LABELS) - set(CATEGORY_HEADS))
     if unknown:
         raise ValueError(f"Unknown NIH labels: {unknown}")
     return labels
 
 
 def label_matrix(frame: pd.DataFrame, labels: list[str]) -> np.ndarray:
-    sets = frame["Finding Labels"].fillna("").map(lambda value: set(str(value).split("|")))
+    sets = frame["Finding Labels"].fillna("").map(expanded_labels)
     return np.asarray([[label in found for label in labels] for found in sets], dtype=np.int8)
 
 

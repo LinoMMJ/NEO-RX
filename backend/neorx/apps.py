@@ -22,13 +22,24 @@ class NeorxConfig(AppConfig):
             return
         try:
             from diagnostico.services import DetectorTorax
-            logger.info("[STARTUP] Precargando modelo ResNet-50...")
+            logger.info("[STARTUP] Precargando modelo CNN configurado...")
             t0 = time.time()
-            detector = DetectorTorax.cargar()
+            from django.conf import settings
+            if settings.NEORX_INFERENCE_MODE == "thread":
+                from diagnostico.local_queue import prepare_local_inference
+                detector = prepare_local_inference()
+            else:
+                detector = DetectorTorax.cargar()
             logger.info(
                 f"[STARTUP] Modelo listo en {time.time() - t0:.1f}s "
                 f"({len(detector.pathologies)} patologías)"
             )
+            from django.conf import settings
+            if settings.NEORX_INFERENCE_MODE == "thread":
+                from diagnostico.local_queue import recover_pending_local_inferences
+                pending = recover_pending_local_inferences()
+                if pending:
+                    logger.info("[STARTUP] Se reanudaron %s análisis pendientes.", pending)
         except Exception as e:
             logger.error(f"[STARTUP] Error al precargar modelo: {e}")
             logger.warning("[STARTUP] La primera inferencia será más lenta.")

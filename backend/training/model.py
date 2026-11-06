@@ -74,7 +74,7 @@ def build_model(cfg: Dict) -> xrv.models.ResNet:
     num_classes = len(labels)
 
     # Load pretrained xrv model (includes op_norm=Sigmoid in forward)
-    model = xrv.models.ResNet(weights=base_weights)
+    model = xrv.models.ResNet(weights=base_weights, cache_dir=cfg['model'].get('cache_dir'))
 
     # Replace classification head: xrv stores torchvision resnet in .model
     # model.model.fc is the final Linear layer
@@ -140,6 +140,7 @@ def save_checkpoint(
     metrics: Optional[Dict] = None,
     extra: Optional[Dict] = None,
     thresholds: Optional[List[float]] = None,
+    decision_policy: Optional[Dict[str, Dict[str, Any]]] = None,
     pos_weight: Optional[List[float]] = None,
     training_state: Optional[Dict[str, Any]] = None,
 ) -> None:
@@ -154,6 +155,7 @@ def save_checkpoint(
         metrics: Optional dict with AUC, etc.
         extra: Any extra metadata (e.g., config, date, git hash)
         thresholds: Optional list of optimal thresholds per class (from validation)
+        decision_policy: Per-class deployment eligibility and validation evidence.
         pos_weight: Optional list of pos_weight values per class (from train split)
         training_state: Optimizer/scheduler/scaler/RNG state for exact resume.
     """
@@ -179,6 +181,11 @@ def save_checkpoint(
             threshold_dict = {label: float(thr) for label, thr in zip(pathologies, thresholds)}
         checkpoint["thresholds"] = threshold_dict
         checkpoint["thresholds_list"] = [threshold_dict[label] for label in pathologies]
+
+    if decision_policy is not None:
+        checkpoint["decision_policy"] = {
+            label: dict(decision_policy.get(label, {})) for label in pathologies
+        }
 
     # Add pos_weight if provided (calculated from TRAIN split)
     if pos_weight is not None:
@@ -219,6 +226,7 @@ def load_checkpoint(path: Path) -> Dict[str, Any]:
 def load_finetuned_model(
     checkpoint_path: Path,
     base_weights: str = "resnet50-res512-all",
+    cache_dir: Optional[str] = None,
 ) -> xrv.models.ResNet:
     """
     Load fine-tuned model from checkpoint, ready for inference.
@@ -238,7 +246,7 @@ def load_finetuned_model(
     num_classes = len(pathologies)
 
     # Instantiate base model (weights will be overwritten)
-    model = xrv.models.ResNet(weights=base_weights)
+    model = xrv.models.ResNet(weights=base_weights, cache_dir=cache_dir)
 
     # Replace head to match checkpoint
     in_features = model.model.fc.in_features
@@ -256,6 +264,8 @@ def load_finetuned_model(
         model.thresholds = ckpt["thresholds"]
     elif "thresholds_list" in ckpt:
         model.thresholds = {label: thr for label, thr in zip(pathologies, ckpt["thresholds_list"])}
+    model.decision_policy = ckpt.get("decision_policy", {})
+    model.decision_strategy = ckpt.get("extra", {}).get("config", {}).get("decision_strategy")
 
     model.eval()
     return model

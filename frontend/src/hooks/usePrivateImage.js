@@ -12,11 +12,13 @@ export default function usePrivateImage(source) {
     if (source.startsWith('blob:') || source.startsWith('data:image/')) {
       return
     }
-    const backend = new URL(api.defaults.baseURL, window.location.href)
-    const target = new URL(source, backend)
-    // Never send authentication headers to external image origins.
-    if (target.origin !== backend.origin || !target.pathname.startsWith('/media/')) return
-    api.get(target.href, { responseType: 'blob', signal: controller.signal })
+    const backend = new URL(api.defaults.baseURL || '/api/', window.location.href)
+    const target = new URL(source, backend.origin)
+    // La API puede responder localhost, 127.0.0.1 o el host del proxy. Solo
+    // conservamos la ruta privada /media/ y la solicitamos al origen configurado.
+    if (!target.pathname.startsWith('/media/')) return
+    const authenticatedUrl = `${backend.origin}${target.pathname}${target.search}`
+    api.get(authenticatedUrl, { responseType: 'blob', signal: controller.signal })
       .then(({ data }) => {
         if (!active) return
         objectUrl = URL.createObjectURL(data)

@@ -1,5 +1,5 @@
 """
-Grad-CAM (Gradient-weighted Class Activation Mapping) para torchxrayvision ResNet-50.
+Grad-CAM (Gradient-weighted Class Activation Mapping) para modelos de torchxrayvision.
 
 El mapa de calor muestra los gradientes de la clase predicha respecto a los
 feature maps de la capa convolucional final (layer4), evidenciando las regiones
@@ -24,11 +24,14 @@ from torchvision.models.resnet import ResNet
 
 
 class GeneradorGradCAM:
-    """Genera visualizaciones Grad-CAM para modelos ResNet de torchxrayvision."""
+    """Genera visualizaciones Grad-CAM para modelos ResNet y DenseNet."""
 
     @staticmethod
     def _capa_objetivo(modelo):
         """Retorna layer4 (2048 feature maps, 16×16 para entrada 512×512)."""
+        # TorchXRayVision DenseNet: salida completa antes de GAP + classifier.
+        if hasattr(getattr(modelo, 'features', None), 'norm5'):
+            return modelo.features
         try:
             return modelo.model.layer4
         except AttributeError:
@@ -127,24 +130,25 @@ class GeneradorGradCAM:
         orig_rgb = cv2.cvtColor(img_norm, cv2.COLOR_GRAY2RGB)
         orig_rgb_resized = cv2.resize(orig_rgb, (512, 512))
 
-        cam_u8 = (cam * 255).astype(np.uint8)
-        heatmap_bgr = cv2.applyColorMap(cam_u8, cv2.COLORMAP_JET)
+        # Grad-CAM nace en una rejilla convolucional pequeña. Una suavización
+        # moderada evita que la interpolación se vea como puntos aislados sin
+        # convertirla en una segmentación ni inventar bordes anatómicos.
+        cam_visual = cls._preparar_mapa_visual(cam)
+        cam_u8 = np.round(cam_visual * 255).astype(np.uint8)
+        heatmap_bgr = cv2.applyColorMap(cam_u8, cv2.COLORMAP_MAGMA)
         heatmap_rgb = cv2.cvtColor(heatmap_bgr, cv2.COLOR_BGR2RGB)
 
-        # Mezcla: 55% radiografía + 45% mapa de calor
-        overlay = cv2.addWeighted(orig_rgb_resized, 0.55, heatmap_rgb, 0.45, 0)
-
-        # Dibuja círculo en el centroide de mayor activación
-        _, thresh = cv2.threshold(cam_u8, 200, 255, cv2.THRESH_BINARY)
-        contornos, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if contornos:
-            c = max(contornos, key=cv2.contourArea)
-            M = cv2.moments(c)
-            if M["m00"] > 0:
-                cx = int(M["m10"] / M["m00"])
-                cy = int(M["m01"] / M["m00"])
-                cv2.circle(overlay, (cx, cy), 18, (255, 255, 0), 2)
-                cv2.circle(overlay, (cx, cy), 4, (255, 255, 0), -1)
+        # Alfa espacial: las zonas sin activación conservan la radiografía y
+        # las zonas relevantes forman manchas regionales continuas. Se elimina
+        # deliberadamente el círculo/centroide: sugería una precisión puntual
+        # que Grad-CAM no ofrece.
+        alpha = (0.62 * np.power(cam_visual, 0.72))[..., None]
+        overlay = np.clip(
+            orig_rgb_resized.astype(np.float32) * (1.0 - alpha)
+            + heatmap_rgb.astype(np.float32) * alpha,
+            0,
+            255,
+        ).astype(np.uint8)
 
         pil = Image.fromarray(overlay)
         buf = io.BytesIO()
@@ -157,13 +161,43 @@ class GeneradorGradCAM:
         if cam is None:
             cam = cls.calcular(modelo, tensor, indice_clase)
 
-        cam_u8 = (cam * 255).astype(np.uint8)
-        heatmap_bgr = cv2.applyColorMap(cam_u8, cv2.COLORMAP_JET)
+        cam_visual = cls._preparar_mapa_visual(cam)
+        cam_u8 = np.round(cam_visual * 255).astype(np.uint8)
+        heatmap_bgr = cv2.applyColorMap(cam_u8, cv2.COLORMAP_MAGMA)
         heatmap_rgb = cv2.cvtColor(heatmap_bgr, cv2.COLOR_BGR2RGB)
         pil = Image.fromarray(heatmap_rgb)
         buf = io.BytesIO()
         pil.save(buf, format="PNG")
         return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+    @staticmethod
+    def _preparar_mapa_visual(cam):
+        """Prepara una vista regional sin alterar el Grad-CAM cuantitativo.
+
+        El resultado se usa solo para renderizar. ``get_centroide`` y los datos
+        de auditoría continúan trabajando con el CAM original.
+        """
+        array = np.asarray(cam, dtype=np.float32)
+        if array.ndim != 2 or not np.isfinite(array).all():
+            raise ValueError("El mapa de activación debe ser una matriz 2D finita.")
+
+        # Sigma proporcional: ~1.8 % del lado (9 px en una salida de 512 px).
+        # Es suficiente para unir bloques de la última capa sin extender una
+        # activación a zonas anatómicas alejadas.
+        sigma = max(1.0, min(array.shape) * 0.018)
+        suave = cv2.GaussianBlur(array, (0, 0), sigmaX=sigma, sigmaY=sigma)
+        maximo = float(suave.max())
+        if maximo <= 1e-8:
+            return np.zeros_like(suave, dtype=np.float32)
+
+        # Contraste robusto para que una activación secundaria siga siendo
+        # visible como región, sin saturar todo el tórax por un único máximo.
+        positivos = suave[suave > maximo * 0.01]
+        alto = float(np.percentile(positivos, 99)) if positivos.size else maximo
+        escala = max(alto, maximo * 0.25, 1e-8)
+        visual = np.clip(suave / escala, 0.0, 1.0)
+        visual[visual < 0.025] = 0.0
+        return visual.astype(np.float32)
     _features = WeakKeyDictionary()
 
     @staticmethod

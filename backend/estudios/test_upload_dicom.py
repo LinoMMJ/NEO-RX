@@ -2,12 +2,14 @@ import io
 from unittest.mock import patch
 
 import numpy as np
+import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
 from pydicom.dataset import FileDataset, FileMetaDataset
 from pydicom.uid import ExplicitVRLittleEndian, SecondaryCaptureImageStorage, generate_uid
 
 from estudios.utils import dicom_pixel_array_2d
 from estudios.validators import validate_file_comprehensive
+from estudios.views import _ensure_png_preview, _raster_a_png
 
 
 def _rgb_dicom_bytes(body_part="CHEST"):
@@ -49,7 +51,46 @@ def test_rgb_dicom_without_optional_clinical_metadata_is_valid():
     assert pixels.shape == (32, 48)
     assert pixels.dtype == np.float32
 
-import pytest
+
+@pytest.mark.parametrize(
+    ("extension", "pil_format", "content_type"),
+    [("tiff", "TIFF", "image/tiff"), ("bmp", "BMP", "image/bmp"),
+     ("png", "PNG", "image/png"), ("jpg", "JPEG", "image/jpeg"),
+     ("jpeg", "JPEG", "image/jpeg"), ("webp", "WEBP", "image/webp")],
+)
+def test_supported_raster_formats_are_validated_and_normalized(extension, pil_format, content_type, tmp_path):
+    from PIL import Image
+
+    original = tmp_path / f"radiografia.{extension}"
+    Image.fromarray(np.tile(np.arange(128, dtype=np.uint8), (128, 1)), "L").save(original, format=pil_format)
+    upload = SimpleUploadedFile(original.name, original.read_bytes(), content_type=content_type)
+
+    result = validate_file_comprehensive(upload)
+    png_content, png_name = _raster_a_png(original)
+
+    assert result["valid"] is True
+    assert result["mime_type"] == content_type
+    assert result["metadata"]["format"] == pil_format
+    assert png_name.endswith(".png")
+    assert png_content.read(8) == b"\x89PNG\r\n\x1a\n"
+
+
+def test_legacy_raster_without_preview_is_repaired(tmp_path, settings, imagen_con_resultado):
+    from PIL import Image
+
+    settings.MEDIA_ROOT = tmp_path
+    source = tmp_path / "legacy" / "radiografia.bmp"
+    source.parent.mkdir(parents=True)
+    Image.fromarray(np.tile(np.arange(128, dtype=np.uint8), (128, 1)), "L").save(source, format="BMP")
+    imagen_con_resultado.archivo_dicom.name = "legacy/radiografia.bmp"
+    imagen_con_resultado.archivo_png = None
+    imagen_con_resultado.save(update_fields=["archivo_dicom", "archivo_png"])
+
+    assert _ensure_png_preview(imagen_con_resultado) is True
+    imagen_con_resultado.refresh_from_db()
+    assert imagen_con_resultado.archivo_png.name.endswith(".png")
+    assert (tmp_path / imagen_con_resultado.archivo_png.name).is_file()
+
 from datetime import date
 from django.test import override_settings
 from django.urls import reverse

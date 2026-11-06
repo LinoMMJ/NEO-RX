@@ -18,6 +18,7 @@ from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms as T
 
 from training.configuration import get_target_labels
+from diagnostico.priority_policy import expanded_labels
 
 IMAGE_COLUMN = "Image Index"
 LABEL_COLUMN = "Finding Labels"
@@ -28,7 +29,7 @@ VIEW_COLUMN = "View Position"
 def parse_finding_labels(finding_str: str, label_set: set) -> List[str]:
     if pd.isna(finding_str):
         return []
-    return [label.strip() for label in str(finding_str).split("|") if label.strip() in label_set]
+    return sorted(expanded_labels(finding_str).intersection(label_set))
 
 
 class XRayToTensor:

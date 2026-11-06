@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { AlertTriangle, Archive, CheckCircle2, ShieldX } from 'lucide-react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
@@ -15,6 +15,7 @@ import ProyeccionBadge from '../components/scan/ProyeccionBadge'
 import Button from '../components/ui/Button'
 import useObjectUrl from '../hooks/useObjectUrl'
 import useGradCAM from '../hooks/useGradCAM'
+import { waitForInference } from '../utils/waitForInference'
 
 const normalizarResultado = (data) => {
   const raw = data?.patologias
@@ -30,6 +31,10 @@ const normalizarResultado = (data) => {
     modelo: data.modelo || raw.modelo,
     es_fine_tuned: data.es_fine_tuned ?? raw.es_fine_tuned,
     thresholds: data.thresholds || raw.thresholds,
+    decision: data.decision || raw.decision,
+    categoria: data.categoria || raw.categoria,
+    enfoque: data.enfoque || raw.enfoque,
+    alcance_modelo: data.alcance_modelo || raw.alcance,
     nota_modelo: data.nota_modelo || raw.nota,
   }
 }
@@ -43,6 +48,12 @@ export default function EscaneoPage() {
   const [archivo, setArchivo] = useState(null)
   const [dicomPreview, setDicomPreview] = useState(null)
   const [previewLoading, setPreviewLoading] = useState(false)
+  const previewRequest = useRef(0)
+  const scanRequest = useRef(null)
+  useEffect(() => () => {
+    scanRequest.current?.abort()
+    previewRequest.current += 1
+  }, [])
 
   const [paciente, setPaciente] = useState(null)
   useEffect(() => {if(!pacienteId)return;let active=true;getPaciente(pacienteId).then(({data})=>{if(active)setPaciente(data)}).catch(()=>{});return ()=>{active=false}},[pacienteId])
@@ -73,69 +84,65 @@ export default function EscaneoPage() {
   const pacienteValido = !!paciente
 
   // El navegador no puede dibujar DICOM directamente. Para DICOM se usa la
-  // miniatura segura devuelta por el backend; PNG/JPG/WebP siguen usando URL local.
-  const objectPreviewUrl = useObjectUrl(archivo)
+  // miniatura segura devuelta por el backend; los formatos web usan URL local.
+  // TIFF y BMP se normalizan a PNG al subirlos porque no todos los navegadores los dibujan.
+  const extension = archivo?.name?.toLowerCase().split('.').pop()
+  const archivoConPreviewWeb = ['png', 'jpg', 'jpeg', 'webp'].includes(extension)
+  const objectPreviewUrl = useObjectUrl(archivoConPreviewWeb ? archivo : null)
   const archivoEsDicom = Boolean(archivo?.name?.toLowerCase().match(/\.(dcm|dicom)$/))
   const imagenPreviewUrl = archivoEsDicom ? dicomPreview : objectPreviewUrl
 
   const handleArchivo = async (nuevoArchivo) => {
+    const request = ++previewRequest.current
     setArchivo(nuevoArchivo)
     setDicomPreview(null)
+    setPreviewLoading(false)
     if (!nuevoArchivo || !nuevoArchivo.name?.toLowerCase().match(/\.(dcm|dicom)$/)) return
 
     setPreviewLoading(true)
     try {
       const { data } = await previsualizarDicom(nuevoArchivo)
-      setDicomPreview(data.preview_url)
+      if (request === previewRequest.current) setDicomPreview(data.preview_url)
     } catch {
-      toast.error('No se pudo crear la vista previa DICOM. Puedes elegir otro archivo.')
+      if (request === previewRequest.current) toast.error('No se pudo crear la vista previa DICOM. Puedes elegir otro archivo.')
     } finally {
-      setPreviewLoading(false)
+      if (request === previewRequest.current) setPreviewLoading(false)
     }
   }
 
-  const esperarResultadoTarea = async (taskId, savedStudyId) => {
-    const maxIntentos = 90
-    for (let i = 0; i < maxIntentos; i++) {
-      await new Promise(r => setTimeout(r, 1000))
-      try {
-        const { data: r } = await obtenerEstadoTarea(taskId)
-
-        if (r.status === 'FAILURE') {
-          toast.error('Error en el análisis CNN. Intenta de nuevo.')
-          setFase('upload')
-          return
-        }
-
-        if (r.status === 'STORED') {
-          setProgreso(100)
-          if (r.estudio_id) setEstudioId(r.estudio_id)
-          setResultado(r)
-          setFase('guardada')
-          return
-        }
-
-        if (r.status === 'SUCCESS') {
-          setProgreso(100)
-          if (r.estudio_id) setEstudioId(r.estudio_id)
-          if (r.proyeccion) setProyeccion(r.proyeccion)
-          const resultadoNormalizado = normalizarResultado(r)
-          setResultado(resultadoNormalizado)
-          setFase('resultados')
-          if (r.advertencia_proyeccion) toast.info(r.advertencia_proyeccion)
-          return
-        }
-        // PENDING / STARTED: seguir esperando (la barra de progreso sigue animando sola)
-      } catch {
-        // error de red transitorio — seguir intentando
-      }
+  const esperarResultadoTarea = async (taskId, savedStudyId, signal) => {
+    let r
+    try {
+      r = await waitForInference((requestSignal) => obtenerEstadoTarea(taskId, requestSignal), { signal })
+    } catch (error) {
+      if (signal.aborted) return
+      toast.error(error.response?.data?.error || 'No se puede consultar el análisis. Revisa el estudio guardado.')
+      navigate(`/analisis/${savedStudyId}`)
+      return
+    }
+    if (signal.aborted) return
+    if (r?.status === 'FAILURE') {
+      toast.error(r.error || 'No se pudo completar el análisis. La imagen sigue guardada.')
+      navigate(`/analisis/${savedStudyId}`)
+      return
+    }
+    if (r) {
+      setProgreso(100)
+      if (r.estudio_id) setEstudioId(r.estudio_id)
+      if (r.proyeccion) setProyeccion(r.proyeccion)
+      setResultado(normalizarResultado(r))
+      setFase(r.status === 'SUCCESS' ? 'resultados' : 'guardada')
+      if (r.advertencia_proyeccion) toast.info(r.advertencia_proyeccion)
+      return
     }
     toast.info('El estudio está guardado y continúa pendiente. Puedes consultar su estado sin volver a subir la imagen.')
     navigate(`/analisis/${savedStudyId}`)
   }
 
   const handleIniciarAnalisis = async () => {
-    if (!archivo || !pacienteValido) return
+    if (!archivo || !pacienteValido || scanRequest.current) return
+    const controller = new AbortController()
+    scanRequest.current = controller
     setProgreso(0)
     setResultado(null)
     maps.reset()
@@ -149,8 +156,9 @@ export default function EscaneoPage() {
       formData.append('observaciones', observaciones)
 
       const { data } = await uploadDicom(formData, (event) => {
-        if (event.total) setProgreso(5 + Math.round((event.loaded / event.total) * 15))
-      })
+        if (event.total && !controller.signal.aborted) setProgreso(5 + Math.round((event.loaded / event.total) * 15))
+      }, controller.signal)
+      if (controller.signal.aborted) return
 
       if (data.estudio_id) setEstudioId(data.estudio_id)
 
@@ -180,9 +188,14 @@ export default function EscaneoPage() {
 
       if (data.status === 'procesando') {
         if (data.proyeccion) setProyeccion(data.proyeccion)
-        await esperarResultadoTarea(data.task_id, data.estudio_id)
+        await esperarResultadoTarea(data.task_id, data.estudio_id, controller.signal)
+      } else {
+        toast.error('El servidor devolvió un estado no reconocido. Revisa el estudio antes de repetir la carga.')
+        if (data.estudio_id) navigate(`/analisis/${data.estudio_id}`)
+        else setFase('upload')
       }
     } catch (error) {
+      if (controller.signal.aborted) return
       const response = error.response?.data
       if (response?.status === 'REJECTED' || response?.codigo === 'no_radiografia') {
         setResultado(response)
@@ -198,6 +211,8 @@ export default function EscaneoPage() {
         return
       }
       setFase('upload')
+    } finally {
+      if (scanRequest.current === controller) scanRequest.current = null
     }
   }
 
@@ -207,6 +222,8 @@ export default function EscaneoPage() {
   }
 
   const reiniciar = () => {
+    previewRequest.current += 1
+    setPreviewLoading(false)
     setFase('upload'); setArchivo(null); setDicomPreview(null); setResultado(null)
     maps.reset(); setProyeccion(null)
   }
@@ -353,7 +370,7 @@ export default function EscaneoPage() {
             <div className="space-y-3 px-6 py-5 text-sm text-slate-600">
               <p>{resultado.clasificacion?.reason}</p>
               <p className="rounded-xl bg-slate-50 px-4 py-3 font-medium text-slate-700">
-                No se creó ningún estudio ni se almacenó el archivo. Usa una radiografía DICOM, PNG o JPG legible.
+                No se creó ningún estudio ni se almacenó el archivo. Usa una radiografía DICOM, PNG, JPG, WEBP, TIFF o BMP legible.
               </p>
             </div>
             <div className="border-t border-slate-100 px-6 py-4">

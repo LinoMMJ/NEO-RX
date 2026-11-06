@@ -1,7 +1,7 @@
 import axios from 'axios'
 import { getAccess, getRefresh, saveSession, clearSession, decodeToken } from './session.js'
 
-const api = axios.create({ baseURL: import.meta.env?.VITE_API_URL || 'http://localhost:8000/api' })
+const api = axios.create({ baseURL: import.meta.env?.VITE_API_URL || '/api' })
 let refreshing = null
 
 export function refreshSession() {

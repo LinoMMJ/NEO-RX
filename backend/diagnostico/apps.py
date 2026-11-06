@@ -18,7 +18,7 @@ class DiagnosticoConfig(AppConfig):
         def _precargar():
             try:
                 from diagnostico.services import DetectorTorax
-                logger.info('[Neo RX] Precargando modelo CNN ResNet-50...')
+                logger.info('[Neo RX] Precargando modelo CNN configurado...')
                 DetectorTorax.cargar()
                 logger.info('[Neo RX] Modelo CNN listo.')
             except Exception as e:

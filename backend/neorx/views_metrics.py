@@ -13,7 +13,7 @@ Retorna:
 
 from datetime import datetime, timedelta, date
 from django.utils import timezone
-from diagnostico.results import probabilities_es
+from diagnostico.results import threshold_findings
 from django.db.models import Count, Q, F, ExpressionWrapper
 from django.db.models.functions import TruncHour
 from rest_framework.views import APIView
@@ -160,9 +160,9 @@ class MetricasOperacionalesView(APIView):
         ).values_list("patologias", flat=True)
         for pats in resultados:
             if isinstance(pats, dict):
-                for nombre, prob in probabilities_es(pats).items():
-                    if prob >= 0.15:  # umbral de mención
-                        patologias_counter[nombre] += 1
+                for finding in threshold_findings(pats):
+                    if finding['detectado']:
+                        patologias_counter[finding['etiqueta']] += 1
 
         top_patologias = [
             {"nombre": k, "conteo": v}

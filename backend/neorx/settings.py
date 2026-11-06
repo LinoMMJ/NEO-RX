@@ -303,11 +303,13 @@ CELERY_RESULT_SERIALIZER = "json"
 
 CELERY_TIMEZONE = "America/La_Paz"
 CELERY_TASK_TRACK_STARTED = True
-# Desarrollo local: ejecutar el diagnóstico en el request para no depender de
-# un worker Celery ausente. Producción puede configurar "celery" explícitamente.
-NEORX_INFERENCE_MODE = os.getenv("NEORX_INFERENCE_MODE", "inline" if DEBUG else "celery").lower()
-CELERY_TASK_SOFT_TIME_LIMIT = int(os.getenv("NEORX_CNN_SOFT_LIMIT", "90"))
-CELERY_TASK_TIME_LIMIT = int(os.getenv("NEORX_CNN_TIME_LIMIT", "120"))
+# Desarrollo local: un trabajador interno evita bloquear la petición cuando
+# Redis no está instalado. Producción utiliza Celery explícitamente.
+NEORX_INFERENCE_MODE = os.getenv("NEORX_INFERENCE_MODE", "thread" if DEBUG else "celery").lower()
+# En CPU, la primera inferencia puede incluir calentamiento de kernels. Los
+# límites deben impedir bloqueos indefinidos sin cancelar una ejecución válida.
+CELERY_TASK_SOFT_TIME_LIMIT = int(os.getenv("NEORX_CNN_SOFT_LIMIT", "180"))
+CELERY_TASK_TIME_LIMIT = int(os.getenv("NEORX_CNN_TIME_LIMIT", "240"))
 CELERY_TASK_ROUTES = {
     "diagnostico.tasks.procesar_imagen_cnn": {
         "queue": "cnn_inference",

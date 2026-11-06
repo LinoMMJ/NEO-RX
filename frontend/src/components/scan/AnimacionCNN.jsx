@@ -8,7 +8,7 @@ const CAPAS = [
   { id: 'features2', name: 'RASGOS 2', ch: 'texturas', desc: 'Detección de patrones pulmonares', size: 'mapas', color: '#38bdf8' },
   { id: 'features3', name: 'RASGOS 3', ch: 'formas', desc: 'Combinación de características', size: 'mapas', color: '#0EA5E9' },
   { id: 'final', name: 'MAPA FINAL', ch: 'activación', desc: 'Regiones relevantes para el modelo', size: 'mapas', color: '#f59e0b', gradcam: true },
-  { id: 'output', name: 'SALIDA', ch: 'puntajes', desc: 'Puntuaciones por hallazgo', size: 'vector', color: '#10b981' },
+  { id: 'output', name: 'SALIDA', ch: 'prioridad', desc: 'Derrame pleural u orientación por categoría', size: 'vector', color: '#10b981' },
 ]
 
 // Textos de estado que cambian progresivamente durante el análisis
@@ -18,7 +18,7 @@ const ESTADOS = [
   { t: 2600, msg: 'Normalizando imagen al rango [-1024, 1024]…' },
   { t: 3800, msg: 'Extrayendo características con la red convolucional…' },
   { t: 5200, msg: 'Combinando patrones radiográficos…' },
-  { t: 6800, msg: 'Calculando puntuaciones para los hallazgos configurados…' },
+  { t: 6800, msg: 'Evaluando derrame pleural y orientación por categorías…' },
 ]
 
 export default function AnimacionCNN({ imagenPreview, progreso = 0, completado = false }) {
@@ -188,9 +188,8 @@ export default function AnimacionCNN({ imagenPreview, progreso = 0, completado =
         )}
       </div>
 
-      {/* Nota técnica para la tesis */}
       <p className="mt-6 font-mono text-[10px] text-white/25 text-center">
-        Modelo torácico preentrenado · El detalle técnico real se mostrará con el resultado
+        Procesamiento automatizado de radiografía torácica
       </p>
     </div>
   )

@@ -3,6 +3,11 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.pytest*/
+.pytest_*/
+.audit-venv/
+.test-venv*/
+.backups/
 db.sqlite3
 media/
 static/
@@ -15,3 +20,6 @@ training/runs/
 .git/
 venv/
 .venv/
+tests/
+htmlcov/
+.coverage

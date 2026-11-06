@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Archive, ArrowLeft, FileText, RotateCcw } from 'lucide-react'
 
 import { getEstudio } from '../api/pacientes'
-import { getResultado } from '../api/estudios'
+import { getResultado, reintentarImagen } from '../api/estudios'
 import useGradCAM from '../hooks/useGradCAM'
 import { errorMessage } from '../api/errors'
 import { useAuth } from '../context/useAuth'
@@ -31,7 +31,7 @@ function RadiografiaGuardada({ result }) {
           <div className="min-w-0">
             <h2>Radiografía guardada sin CNN</h2>
             <p className="mt-1 text-sm leading-6 text-slate-600">
-              La imagen forma parte del expediente, pero no corresponde a un estudio torácico elegible para este modelo.
+              La imagen forma parte del expediente. El motivo de no ejecutar la CNN se detalla debajo.
             </p>
           </div>
         </div>
@@ -42,7 +42,7 @@ function RadiografiaGuardada({ result }) {
           </div>
           <div>
             <dt className="text-slate-600">Clasificación</dt>
-            <dd className="mt-1 font-semibold text-navy">Otra radiografía</dd>
+            <dd className="mt-1 font-semibold text-navy">{result.clasificacion_imagen === 'chest_xray' ? 'Radiografía de tórax' : 'Otra radiografía'}</dd>
           </div>
           <div>
             <dt className="text-slate-600">Motivo</dt>
@@ -60,6 +60,9 @@ export default function AnalisisPage() {
   const { rol } = useAuth()
   const [state, setState] = useState({ loading: true, study: null, result: null, error: '' })
   const [revision, setRevision] = useState(0)
+  const [refreshing, setRefreshing] = useState(false)
+  const [retrying, setRetrying] = useState(false)
+  const [retryError, setRetryError] = useState('')
   const maps = useGradCAM()
   const { data: gradCAM, loading: gradLoading, error: gradError, pathology } = maps
 
@@ -77,16 +80,46 @@ export default function AnalisisPage() {
       .catch((error) => {
         if (active) setState({ loading: false, study: null, result: null, error: errorMessage(error, 'No se pudo recuperar el estudio.') })
       })
+      .finally(() => {
+        if (active) setRefreshing(false)
+      })
     return () => { active = false }
   }, [id, revision])
+
+  // Una inferencia en CPU termina en segundo plano. Actualizar automáticamente
+  // evita que el usuario quede en una pantalla pendiente aunque Celery ya haya
+  // guardado el resultado y el informe.
+  useEffect(() => {
+    if (state.loading || state.error || refreshing || state.result?.estado_procesamiento !== 'pendiente') return undefined
+    const timer = window.setTimeout(() => {
+      setRefreshing(true)
+      setRevision((value) => value + 1)
+    }, 3000)
+    return () => window.clearTimeout(timer)
+  }, [state.loading, state.error, state.result?.estado_procesamiento, refreshing, revision])
 
   async function changePathology(name) {
     if (!state.study?.ultima_imagen_id) return
     await maps.load(state.study.ultima_imagen_id, name)
   }
 
+  async function retryAnalysis() {
+    if (retrying) return
+    setRetrying(true)
+    setRetryError('')
+    try {
+      await reintentarImagen(state.study.ultima_imagen_id)
+      setRevision(value => value + 1)
+    } catch (error) {
+      setRetryError(errorMessage(error, 'No se pudo reintentar. La imagen sigue guardada.'))
+    } finally {
+      setRetrying(false)
+    }
+  }
+
   const { study, result, loading, error } = state
-  const storedWithoutCnn = result?.estado_procesamiento === 'sin_analisis' && result?.apta_para_cnn === false
+  const storedWithoutCnn = result?.estado_procesamiento === 'sin_analisis'
+  const analysisComplete = result?.estado_procesamiento === 'procesado' || Boolean(result?.id)
 
   return (
     <div className="workspace">
@@ -131,12 +164,24 @@ export default function AnalisisPage() {
             </div>
           ) : storedWithoutCnn ? (
             <RadiografiaGuardada result={result} />
-          ) : !result?.patologias ? (
+          ) : result?.estado_procesamiento === 'error' ? (
+            <section className="panel empty-state" role="alert">
+              <h2>El análisis no pudo completarse</h2>
+              <p>La radiografía está guardada. Puedes reintentar el procesamiento sin volver a cargarla.</p>
+              {retryError && <p className="error-state mt-3">{retryError}</p>}
+              {rol !== 'administrador' && <button className="btn-primary mt-4" disabled={retrying} onClick={retryAnalysis}>
+                <RotateCcw size={16} /> {retrying ? 'Iniciando análisis…' : 'Reintentar análisis'}
+              </button>}
+            </section>
+          ) : !analysisComplete ? (
             <div className="panel empty-state">
               <h2>Análisis pendiente</h2>
-              <p>La imagen está registrada; el resultado todavía no está disponible ({result?.estado_procesamiento || 'pendiente'}).</p>
-              <button className="btn-secondary mt-4" onClick={() => setRevision((value) => value + 1)}>
-                <RotateCcw size={16} /> Actualizar estado
+              <p>La imagen está registrada; el servidor actualizará esta pantalla cuando termine ({result?.estado_procesamiento || 'pendiente'}).</p>
+              <button className="btn-secondary mt-4" disabled={refreshing} onClick={() => {
+                setRefreshing(true)
+                setRevision((value) => value + 1)
+              }}>
+                <RotateCcw size={16} className={refreshing ? 'animate-spin' : ''} /> {refreshing ? 'Consultando…' : 'Actualizar ahora'}
               </button>
             </div>
           ) : (

@@ -1,0 +1,21 @@
+{
+  "fecha": "2026-11-03",
+  "modelo": "neorx_effusion_categories_v1",
+  "modo": "demostracion_no_validada",
+  "muestras": 10,
+  "rutas_esperadas": 10,
+  "resultado": "todas_las_muestras_curadas_generaron_la_salida_esperada",
+  "resultados": [
+    {"archivo": "01_derrame_pleural__00010834_000.png", "etiqueta_nih": "Effusion", "salida": "Derrame pleural", "puntuacion": 0.9975492358},
+    {"archivo": "02_masa_pulmonar__00009671_004.png", "etiqueta_nih": "Mass", "salida": "Tumoral", "puntuacion": 0.9998861551},
+    {"archivo": "03_nodulo_pulmonar__00028416_001.png", "etiqueta_nih": "Nodule", "salida": "Tumoral", "puntuacion": 0.9998667240},
+    {"archivo": "04_neumotorax__00027092_004.png", "etiqueta_nih": "Pneumothorax", "salida": "Pleural", "puntuacion": 0.9649465084},
+    {"archivo": "05_engrosamiento_pleural__00019373_012.png", "etiqueta_nih": "Pleural_Thickening", "salida": "Pleural", "puntuacion": 0.8989903927},
+    {"archivo": "06_neumonia__00026629_006.png", "etiqueta_nih": "Pneumonia", "salida": "Infecciosa", "puntuacion": 0.8115999103},
+    {"archivo": "07_consolidacion__00005600_011.png", "etiqueta_nih": "Consolidation", "salida": "Infecciosa", "puntuacion": 0.5049885511},
+    {"archivo": "08_fibrosis__00004409_001.png", "etiqueta_nih": "Fibrosis", "salida": "Intersticial", "puntuacion": 0.8518857956},
+    {"archivo": "09_edema__00003534_037.png", "etiqueta_nih": "Edema", "salida": "Intersticial", "puntuacion": 0.9153955579},
+    {"archivo": "10_infiltrado__00001381_003.png", "etiqueta_nih": "Infiltration", "salida": "Intersticial", "puntuacion": 0.9400715232}
+  ],
+  "advertencia": "Selección curada desde VALIDACIÓN para demostración; no es una evaluación independiente ni validación clínica."
+}

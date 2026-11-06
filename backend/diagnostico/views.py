@@ -5,7 +5,7 @@ import logging
 
 import numpy as np
 import pydicom
-from PIL import Image as PILImage
+from PIL import Image as PILImage, ImageOps
 
 from django.conf import settings
 from django_ratelimit.decorators import ratelimit
@@ -81,6 +81,12 @@ class ResultadoCNNView(RetrieveAPIView):
         data["es_fine_tuned"] = metadata.get("es_fine_tuned")
         data["resolucion_entrada"] = metadata.get("resolucion_entrada")
         data["thresholds"] = metadata.get("thresholds", {})
+        data["decision"] = metadata.get("decision", {})
+        data["categoria"] = metadata.get("categoria", {})
+        data['enfoque'] = metadata.get('enfoque')
+        data["alcance_modelo"] = metadata.get("alcance", [])
+        data["metricas_modelo"] = metadata.get("metricas_modelo", {})
+        data["informacion_entrenamiento"] = metadata.get("informacion_entrenamiento", {})
         if "resolucion_entrada" not in metadata:
             data["advertencias_modelo"] = [*data["advertencias_modelo"], "Resultado histórico sin resolución ni umbrales conservados. Los cambios actuales no recalculan este estudio."]
         if imagen.tipo_proyeccion:
@@ -105,12 +111,13 @@ class GradCAMView(APIView):
     @staticmethod
     def _cache_key(imagen, pathology_en):
         """Clave versionada: invalida mapas si se reemplaza el checkpoint."""
-        checkpoint = os.environ.get("NEORX_MODEL_PATH", "baseline")
+        checkpoint = os.environ.get("NEORX_MODEL_PATH") or "baseline"
         try:
             revision = str(os.stat(checkpoint).st_mtime_ns) if checkpoint != "baseline" else os.environ.get("NEORX_BASELINE_WEIGHTS", "baseline")
         except OSError:
             revision = checkpoint
-        raw = f"gradcam-v4:{imagen.pk}:{imagen.archivo_dicom.name}:{pathology_en}:{revision}:{DetectorTorax._finetuned_input_size()}"
+        # v5: visualización regional suavizada, sin punto ni círculo de centroide.
+        raw = f"gradcam-v5-regional:{imagen.pk}:{imagen.archivo_dicom.name}:{pathology_en}:{revision}:{DetectorTorax._finetuned_input_size()}"
         return "gradcam:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     def get(self, request):
@@ -130,10 +137,19 @@ class GradCAMView(APIView):
             if resultado is None:
                 return Response({"error": "El mapa requiere un análisis CNN completado."}, status=status.HTTP_409_CONFLICT)
             previous_size = resultado.patologias.get("resolucion_entrada")
-            if previous_size and previous_size != DetectorTorax._finetuned_input_size():
+            if previous_size and previous_size != DetectorTorax.configured_input_size():
                 return Response({"error": "Este resultado se calculó con otra resolución. Realice un nuevo análisis antes de interpretar el mapa."}, status=status.HTTP_409_CONFLICT)
 
+            previous_model = resultado.patologias.get('modelo')
+            if (not os.environ.get('NEORX_MODEL_PATH') and previous_model
+                    and previous_model != os.environ.get('NEORX_BASELINE_WEIGHTS', 'resnet50-res512-all')):
+                return Response({"error": "Este resultado pertenece a otro modelo. Realice un nuevo análisis para generar su mapa."}, status=status.HTTP_409_CONFLICT)
+
             # Si no se especificó patología, usar la de mayor probabilidad
+            if not pathology_en:
+                targets = (resultado.patologias.get('enfoque') or {}).get('objetivos_gradcam', [])
+                if targets:
+                    pathology_en = targets[0]['etiqueta_en']
             if not pathology_en:
                 if resultado and resultado.patologias:
                     scores = probabilities_es(resultado.patologias)
@@ -173,7 +189,10 @@ class GradCAMView(APIView):
                 arr = dicom_display_pixels(ds).astype(np.float32)
                 maxval = 255.0
             else:
-                arr = np.array(PILImage.open(ruta).convert("L")).astype(np.float32)
+                # Match the normalized, EXIF-corrected raster used by inference.
+                ruta = imagen.archivo_png.path if imagen.archivo_png else ruta
+                with PILImage.open(ruta) as source:
+                    arr = np.array(ImageOps.exif_transpose(source).convert("L")).astype(np.float32)
                 maxval = 255.0
 
             tensor = DetectorTorax._preprocesar(arr, maxval)
@@ -201,6 +220,7 @@ class GradCAMView(APIView):
                 "patologia": pathology_en,
                 "activacion_maxima": round(float(cam.max()), 4),
                 "centroide": centroide,
+                "tipo_visualizacion": "gradcam_regional_suavizado",
                 "cache": False,
                 "tiempo_generacion_ms": round((time.perf_counter() - started) * 1000),
             }

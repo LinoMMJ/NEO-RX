@@ -56,9 +56,19 @@ backup_redis() {
     # Forzar BGSAVE y esperar
     docker exec "${CONTAINER_REDIS}" redis-cli BGSAVE
     # Esperar a que termine
-    while docker exec "${CONTAINER_REDIS}" redis-cli LASTSAVE | grep -q "$(docker exec "${CONTAINER_REDIS}" redis-cli LASTSAVE)"; do
+    local attempts=0
+    while docker exec "${CONTAINER_REDIS}" redis-cli INFO persistence | tr -d '\r' | grep -q '^rdb_bgsave_in_progress:1$'; do
+        attempts=$((attempts + 1))
+        if (( attempts >= 120 )); then
+            echo "ERROR: Redis no completó el respaldo en 120 segundos"
+            return 1
+        fi
         sleep 1
     done
+    if ! docker exec "${CONTAINER_REDIS}" redis-cli INFO persistence | tr -d '\r' | grep -q '^rdb_last_bgsave_status:ok$'; then
+        echo "ERROR: Redis informó un fallo al guardar el respaldo"
+        return 1
+    fi
     # Copiar dump.rdb
     docker cp "${CONTAINER_REDIS}":/data/dump.rdb "${output_file}"
 

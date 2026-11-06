@@ -1,6 +1,8 @@
 import axios from 'axios'
 import { getAccess, getRefresh, decodeToken, saveSession, clearSession } from './session.js'
-const BASE = import.meta.env?.VITE_API_URL || 'http://localhost:8000/api'
+// En producción Nginx publica frontend y API en el mismo origen. La variable
+// VITE_API_URL sigue permitiendo apuntar el modo de desarrollo a otro servidor.
+const BASE = import.meta.env?.VITE_API_URL || '/api'
 export const login = async (username, password, remember = false) => {
   const { data } = await axios.post(`${BASE}/token/`, { username, password, remember_me: remember })
   saveSession(data, remember)

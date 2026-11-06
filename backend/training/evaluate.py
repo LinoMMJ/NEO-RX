@@ -42,6 +42,37 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from training.dataset import get_dataloaders
 from training.configuration import get_target_labels
 from training.model import load_finetuned_model, get_thresholds_from_checkpoint
+from training.acceptance import build_acceptance_report
+from diagnostico.priority_policy import CATEGORY_HEADS, priority_result
+
+
+def routing_summary(targets, probs, labels, thresholds, policies, strategy):
+    """Measure deployed routing on held-out data without selecting any thresholds."""
+    states = {}
+    primary = {label: {'true_positive': 0, 'false_positive': 0,
+                       'positive_support': int(targets[:, labels.index(label)].sum())}
+               for label in strategy['primary_labels']}
+    category_correct = category_total = 0
+    for target, scores in zip(targets, probs):
+        result = priority_result(dict(zip(labels, map(float, scores))), thresholds, policies, {}, strategy)
+        state = result['enfoque']['estado']
+        states[state] = states.get(state, 0) + 1
+        for finding in result['enfoque']['hallazgos_detectados']:
+            label = finding['etiqueta_en']
+            key = 'true_positive' if target[labels.index(label)] else 'false_positive'
+            primary[label][key] += 1
+        if state == 'orientacion_categoria':
+            head = next(head for head, (key, _, _) in CATEGORY_HEADS.items() if key == result['categoria']['clave'])
+            category_total += 1
+            category_correct += int(bool(target[labels.index(head)]))
+    for row in primary.values():
+        emitted = row['true_positive'] + row['false_positive']
+        row['precision'] = row['true_positive'] / emitted if emitted else None
+        row['sensitivity'] = row['true_positive'] / row['positive_support'] if row['positive_support'] else None
+    return {'samples': len(targets), 'states': states, 'primary': primary,
+            'category_fallback_count': category_total,
+            'category_fallback_label_agreement': category_correct / category_total if category_total else None,
+            'note': 'Held-out TEST; frozen validation thresholds/policies. Category agreement uses derived dataset labels, not confirmed etiology. No detection does not establish absence.'}
 
 
 def parse_args():
@@ -510,7 +541,7 @@ def main():
     _, _, test_loader = get_dataloaders(cfg, splits_json, data_dir)
 
     # Load model
-    model = load_finetuned_model(args.checkpoint).to(device)
+    model = load_finetuned_model(args.checkpoint, cache_dir=cfg['model'].get('cache_dir')).to(device)
     labels = model.pathologies
     configured_labels = get_target_labels(cfg)
     if configured_labels != labels:
@@ -598,6 +629,16 @@ def main():
         metrics, labels, macro_auc, macro_ap,
         len(targets), str(args.checkpoint), report_json
     )
+    acceptance_cfg = cfg.get("acceptance")
+    if acceptance_cfg:
+        acceptance = build_acceptance_report(metrics, labels, acceptance_cfg)
+        acceptance_path = output_dir / "deployment_acceptance.json"
+        with open(acceptance_path, "w", encoding="utf-8") as handle:
+            json.dump(acceptance, handle, indent=2, ensure_ascii=False)
+        print(
+            "Deployment acceptance: "
+            f"{'PASS' if acceptance['passed'] else 'FAIL'} -> {acceptance_path}"
+        )
     print(f"Classification report saved to {report_json}")
 
     ambiguity = decision_summary(targets, probs, labels, thresholds)
@@ -605,6 +646,11 @@ def main():
     with open(ambiguity_path, "w", encoding="utf-8") as handle:
         json.dump(ambiguity, handle, indent=2, ensure_ascii=False)
     print(f"Decision summary saved to {ambiguity_path}")
+
+    if model.decision_strategy:
+        routing = routing_summary(targets, probs, labels, thresholds, model.decision_policy, model.decision_strategy)
+        with open(output_dir / 'routing_summary.json', 'w', encoding='utf-8') as handle:
+            json.dump(routing, handle, indent=2, ensure_ascii=False, allow_nan=False)
 
     # Plots
     if args.plot:

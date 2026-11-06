@@ -1,0 +1,66 @@
+# NeoRX v2: derrame pleural prioritario y cuatro categorías equilibradas.
+# Es un experimento nuevo: no reanudar con checkpoints v1.
+data:
+  data_dir: /kaggle/input/datasets
+  manifest: /kaggle/working/manifests-priority2-v2/clean_manifest.csv
+  splits_json: /kaggle/working/manifests-priority2-v2/splits.json
+  processed_dir: /kaggle/working/processed-priority2-v2
+model:
+  base_weights: resnet50-res512-all
+  num_classes: 5
+  checkpoint_dir: /kaggle/working/checkpoints-priority2-v2
+  checkpoint_name: neorx_effusion_categories_v2_resnet50.pt
+target_labels: [Effusion, CategoryTumoral, CategoryPleural, CategoryInfectious, CategoryInterstitial]
+labels_es:
+  Effusion: Derrame pleural
+  CategoryTumoral: Orientación tumoral
+  CategoryPleural: Orientación pleural
+  CategoryInfectious: Orientación infecciosa
+  CategoryInterstitial: Orientación intersticial
+decision_strategy:
+  type: priority_then_category_v1
+  primary_labels: [Effusion]
+  category_margin: 0.10
+train:
+  epochs_head: 3
+  epochs_finetune: 24
+  lr_head: 1.0e-3
+  lr_finetune: 7.5e-5
+  weight_decay: 1.0e-4
+  batch_size: 16
+  num_workers: 4
+  mixed_precision: true
+  early_stopping_patience: 8
+  grad_clip: 1.0
+  seed: 42
+  log_dir: /kaggle/working/runs-priority2-v2
+  use_pos_weight: true
+  # Guarda el checkpoint que maximiza la categoría más débil, no solo derrame.
+  selection_metric: minimum_class_auc
+augmentation:
+  enabled: true
+  rotation_degrees: 5
+  scale_range: 0.10
+  brightness: 0.15
+  contrast: 0.15
+  gaussian_noise_std: 0.01
+  horizontal_flip: false
+threshold:
+  method: sensitivity_specificity_guarded
+  target_sensitivity: 0.80
+  min_specificity: 0.70
+  min_predictions: 30
+  min_positive_support: 100
+  min_threshold: 0.05
+  max_threshold: 0.99
+acceptance:
+  # TEST se consulta una sola vez. No equivale a validación clínica externa.
+  minimum_auc_per_class: 0.80
+  minimum_sensitivity_per_class: 0.80
+  minimum_specificity_per_class: 0.70
+safety:
+  require_full_dataset: true
+experiment:
+  name: neorx_effusion_categories_v2_balanced
+  description: Selección por la clase más débil y umbrales con sensibilidad/especificidad protegidas
+  tags: [effusion, categories4, balanced-floor, abstention, resnet50]

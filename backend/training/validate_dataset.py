@@ -122,7 +122,11 @@ def main():
         (position, row, paths, args.min_std) for position, (_, row) in enumerate(metadata.iterrows())
     )
     with ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
-        inspected = list(pool.map(inspect_record, jobs))
+        inspected = []
+        for result in pool.map(inspect_record, jobs):
+            inspected.append(result)
+            if len(inspected) % 1000 == 0:
+                print(f'Audited {len(inspected):,}/{len(metadata):,} images', flush=True)
     clean_rows = [clean for clean, _ in inspected if clean]
     rejected = [reject for _, reject in inspected if reject]
     seen_hashes: Dict[str, str] = {}

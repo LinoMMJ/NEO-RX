@@ -5,6 +5,8 @@ Expone la configuración de umbrales VISUALES para el frontend.
 Los thresholds de DECISIÓN del modelo provienen del checkpoint y se aplican en DetectorTorax.
 """
 
+import math
+
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -47,12 +49,23 @@ class ClasificarProbabilidadesView(APIView):
                 status=400,
             )
 
+        normalized = {}
+        for name, value in patologias.items():
+            if not isinstance(name, str) or not name.strip() or len(name) > 100:
+                return Response({"error": "Cada patología debe tener un nombre válido."}, status=400)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                return Response({"error": f"La puntuación de '{name}' debe ser numérica."}, status=400)
+            score = float(value)
+            if not math.isfinite(score) or not 0 <= score <= 1:
+                return Response({"error": f"La puntuación de '{name}' debe estar entre 0 y 1."}, status=400)
+            normalized[name.strip()] = score
+
         # Opcional: thresholds del modelo para incluir info de detección
         thresholds_modelo = request.data.get("thresholds_modelo")
         detectados = request.data.get("detectados")
 
         resultado = clasificar_todas_para_visualizacion(
-            patologias,
+            normalized,
             thresholds_modelo=thresholds_modelo,
             detectados=detectados
         )

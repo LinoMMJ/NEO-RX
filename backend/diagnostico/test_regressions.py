@@ -1,11 +1,30 @@
 import numpy as np
 import pytest
 import torch
+import base64
+import io
 from torch import nn
+from PIL import Image
 from torchvision.models import resnet18
 from unittest.mock import patch
 
 from diagnostico.gradcam import GeneradorGradCAM
+
+
+def test_gradcam_visual_is_regional_and_has_no_centroid_marker():
+    """El render amplía suavemente la zona, sin dibujar círculos artificiales."""
+    cam = np.zeros((512, 512), dtype=np.float32)
+    cam[256, 256] = 1.0
+    visual = GeneradorGradCAM._preparar_mapa_visual(cam)
+    assert visual[256, 256] == pytest.approx(1.0, abs=1e-5)
+    assert np.count_nonzero(visual > 0.10) > 100
+    assert visual[0, 0] == 0
+
+    original = np.full((512, 512), 128, dtype=np.float32)
+    encoded = GeneradorGradCAM.overlay_base64(None, None, 0, original, cam=cam)
+    rendered = np.array(Image.open(io.BytesIO(base64.b64decode(encoded.split(',', 1)[1]))))
+    # El antiguo marcador usaba amarillo puro (255, 255, 0).
+    assert not np.any(np.all(rendered == (255, 255, 0), axis=-1))
 
 
 def test_fast_gradcam_matches_autograd_and_reuses_features():
@@ -88,7 +107,7 @@ def test_gradcam_rejects_result_from_another_resolution(auth_medico, imagen_con_
     result = imagen_con_resultado.resultado_cnn
     result.patologias = {'resolucion_entrada': 224, 'Neumonía': 0.85}
     result.save()
-    with patch('diagnostico.views.DetectorTorax._finetuned_input_size', return_value=512), patch('diagnostico.views.DetectorTorax.cargar') as load:
+    with patch('diagnostico.views.DetectorTorax.configured_input_size', return_value=512), patch('diagnostico.views.DetectorTorax.cargar') as load:
         response = auth_medico.get('/api/diagnostico/gradcam/', {'imagen_id': imagen_con_resultado.pk, 'pathology': 'Pneumonia'})
     assert response.status_code == 409
     load.assert_not_called()
@@ -120,3 +139,56 @@ def test_signed_dicom_window_and_inversion_are_consistent():
     assert image.dtype == np.uint8 and image.min() == 0 and image.max() == 255
     ds.PhotometricInterpretation = 'MONOCHROME1'
     np.testing.assert_array_equal(dicom_display_pixels(ds), 255 - image)
+
+
+@pytest.mark.django_db
+def test_gradcam_uses_same_normalized_raster_as_inference(auth_medico, imagen_con_resultado, tmp_path, settings):
+    from PIL import Image
+    from django.core.cache import cache
+    from types import SimpleNamespace
+    settings.MEDIA_ROOT = tmp_path
+    cache.clear()
+    Image.fromarray(np.full((32, 32), 20, dtype=np.uint8)).save(tmp_path / 'original.png')
+    Image.fromarray(np.full((32, 32), 180, dtype=np.uint8)).save(tmp_path / 'normalized.png')
+    imagen_con_resultado.archivo_dicom = 'original.png'
+    imagen_con_resultado.archivo_png = 'normalized.png'
+    imagen_con_resultado.save()
+    with patch('diagnostico.views.DetectorTorax.cargar', return_value=SimpleNamespace(pathologies=['Pneumonia'])), \
+         patch('diagnostico.views.DetectorTorax._preprocesar', return_value=torch.zeros(1, 1, 32, 32)) as prepare, \
+         patch.object(GeneradorGradCAM, 'calcular', return_value=np.zeros((512, 512), dtype=np.float32)), \
+         patch.object(GeneradorGradCAM, 'overlay_base64', return_value='data:image/png;base64,test'), \
+         patch.object(GeneradorGradCAM, 'overlay_solo_heatmap_base64', return_value='data:image/png;base64,test'):
+        response = auth_medico.get('/api/diagnostico/gradcam/', {'imagen_id': imagen_con_resultado.pk, 'pathology': 'Pneumonia'})
+    assert response.status_code == 200
+    assert np.all(prepare.call_args.args[0] == 180)
+    cache.clear()
+
+@pytest.mark.parametrize('model,size', [('resnet50-res512-all', 512), ('densenet121-res224-all', 224)])
+def test_baseline_resolution_is_native(monkeypatch, model, size):
+    from diagnostico.services import DetectorTorax
+    monkeypatch.setenv('NEORX_MODEL_PATH', '')
+    monkeypatch.setenv('NEORX_BASELINE_WEIGHTS', model)
+    monkeypatch.setenv('NEORX_INPUT_SIZE', '512')
+    assert DetectorTorax.configured_input_size() == size
+
+
+def test_densenet_gradcam_uses_final_features():
+    import torchxrayvision as xrv
+    model = xrv.models.DenseNet(weights=None, growth_rate=4, block_config=(1, 1, 1, 1), num_init_features=8).eval()
+    torch.set_num_threads(1)
+    cam = GeneradorGradCAM.calcular(model, torch.randn(1, 1, 64, 64), 0)
+    assert GeneradorGradCAM._capa_objetivo(model) is model.features
+    assert cam.shape == (512, 512) and np.isfinite(cam).all()
+
+
+@pytest.mark.django_db
+def test_gradcam_rejects_other_baseline_model(auth_medico, imagen_con_resultado, monkeypatch):
+    monkeypatch.setenv('NEORX_MODEL_PATH', '')
+    monkeypatch.setenv('NEORX_BASELINE_WEIGHTS', 'densenet121-res224-all')
+    result = imagen_con_resultado.resultado_cnn
+    result.patologias = {'modelo': 'another-model', 'resolucion_entrada': 224, 'Neumonia': 0.85}
+    result.save()
+    with patch('diagnostico.views.DetectorTorax.cargar') as load:
+        response = auth_medico.get('/api/diagnostico/gradcam/', {'imagen_id': imagen_con_resultado.pk, 'pathology': 'Pneumonia'})
+    assert response.status_code == 409
+    load.assert_not_called()

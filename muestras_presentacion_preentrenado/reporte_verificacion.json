@@ -1,0 +1,80 @@
+{
+  "modelo": "resnet50-res512-all",
+  "resolucion": 512,
+  "modo": "demostracion_preentrenada_no_clinica",
+  "casos_verificados": 5,
+  "resultado": "5_de_5_salidas_de_presentacion_verificadas",
+  "muestras": [
+    {
+      "archivo": "01_derrame_pleural__00010834_000.png",
+      "sha256": "5c2e92cfec7a2724100f5364da6da39490c26913c33ffcdfbb8d191bdee28768",
+      "salida_esperada": "derrame_pleural",
+      "salida_obtenida": "derrame_pleural",
+      "puntuacion_tecnica": 0.9202358722686768,
+      "objetivo_gradcam": {
+        "etiqueta_en": "Effusion",
+        "etiqueta": "Derrame pleural"
+      },
+      "mapa_superpuesto": "mapa_calor__01_derrame_pleural__00010834_000.png",
+      "mapa_solo_calor": "solo_calor__01_derrame_pleural__00010834_000.png",
+      "segundos_inferencia_y_mapa": 10.507
+    },
+    {
+      "archivo": "02_masa_pulmonar__00009671_004.png",
+      "sha256": "6bd784322ef6955143a77e22d0b51bba1fba05d13ba7449405ad5a60d7cf3a29",
+      "salida_esperada": "categoria_tumoral",
+      "salida_obtenida": "categoria_tumoral",
+      "puntuacion_tecnica": 0.996433675289154,
+      "objetivo_gradcam": {
+        "etiqueta_en": "Mass",
+        "etiqueta": "Orientación tumoral"
+      },
+      "mapa_superpuesto": "mapa_calor__02_masa_pulmonar__00009671_004.png",
+      "mapa_solo_calor": "solo_calor__02_masa_pulmonar__00009671_004.png",
+      "segundos_inferencia_y_mapa": 10.593
+    },
+    {
+      "archivo": "04_neumotorax__00027092_004.png",
+      "sha256": "ca01a16e5e65a2ce9539e49bbe2b30edd4d2bbbc310030eeed496c6099c614be",
+      "salida_esperada": "categoria_pleural",
+      "salida_obtenida": "categoria_pleural",
+      "puntuacion_tecnica": 0.977785050868988,
+      "objetivo_gradcam": {
+        "etiqueta_en": "Pneumothorax",
+        "etiqueta": "Orientación pleural"
+      },
+      "mapa_superpuesto": "mapa_calor__04_neumotorax__00027092_004.png",
+      "mapa_solo_calor": "solo_calor__04_neumotorax__00027092_004.png",
+      "segundos_inferencia_y_mapa": 10.125
+    },
+    {
+      "archivo": "10_infiltrado__00001381_003.png",
+      "sha256": "704ee1343e9f8559d3e7df246b874c232cfb44284e6326f85723bf4ceebdc7ef",
+      "salida_esperada": "categoria_infecciosa",
+      "salida_obtenida": "categoria_infecciosa",
+      "puntuacion_tecnica": 0.7389066815376282,
+      "objetivo_gradcam": {
+        "etiqueta_en": "Infiltration",
+        "etiqueta": "Orientación infecciosa"
+      },
+      "mapa_superpuesto": "mapa_calor__10_infiltrado__00001381_003.png",
+      "mapa_solo_calor": "solo_calor__10_infiltrado__00001381_003.png",
+      "segundos_inferencia_y_mapa": 10.06
+    },
+    {
+      "archivo": "08_fibrosis__00004409_001.png",
+      "sha256": "21fe4c570643e3e6fedd1b7727ed9418d053d58875206de19296e729b7c251f1",
+      "salida_esperada": "categoria_intersticial",
+      "salida_obtenida": "categoria_intersticial",
+      "puntuacion_tecnica": 0.5091763734817505,
+      "objetivo_gradcam": {
+        "etiqueta_en": "Fibrosis",
+        "etiqueta": "Orientación intersticial"
+      },
+      "mapa_superpuesto": "mapa_calor__08_fibrosis__00004409_001.png",
+      "mapa_solo_calor": "solo_calor__08_fibrosis__00004409_001.png",
+      "segundos_inferencia_y_mapa": 10.662
+    }
+  ],
+  "advertencia": "Selección curada para demostrar integración y Grad-CAM. No es un conjunto independiente ni una medición de accuracy, sensibilidad o especificidad."
+}

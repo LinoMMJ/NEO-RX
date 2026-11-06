@@ -26,11 +26,11 @@ const PROY_LABEL = { PA: 'PA · Postero-Anterior', AP: 'AP · Antero-Posterior',
 
 // Cada sección anatómica con su acento de color (estilo informe médico real)
 const SECCIONES = [
-  { key: 'tecnica',         label: 'Técnica',                rows: 2 },
-  { key: 'hallazgos',       label: 'Hallazgos Radiológicos', rows: 9, probs: true },
-  { key: 'correlacion_clinica', label: 'Correlación Clínico-Radiológica', rows: 5 },
-  { key: 'impresion',       label: 'Impresión Diagnóstica',  rows: 4 },
-  { key: 'recomendaciones', label: 'Recomendaciones',        rows: 3 },
+  { key: 'tecnica', label: 'Técnica', rows: 2, help: 'Proyección, calidad técnica y limitaciones del estudio.' },
+  { key: 'hallazgos', label: 'Hallazgos radiológicos', rows: 13, probs: true, help: 'Describa lo que observa por región, con localización y lateralidad.' },
+  { key: 'correlacion_clinica', label: 'Correlación clínico-radiológica', rows: 5, help: 'Relacione la imagen con síntomas, examen físico y antecedentes relevantes.' },
+  { key: 'impresion', label: 'Impresión diagnóstica', rows: 5, help: 'Resuma únicamente los hallazgos confirmados por la revisión médica.' },
+  { key: 'recomendaciones', label: 'Recomendaciones', rows: 3, help: 'Indique seguimiento, estudios complementarios o comunicación urgente.' },
 ]
 
 const PASOS_ESTUDIO = [
@@ -44,6 +44,10 @@ const PASOS_ESTUDIO = [
 function isCompleted(value) {
   const text = String(value || '').trim()
   return text.length > 0 && !/\[(describir|valorar|completar)[^\]]*\]/i.test(text)
+}
+
+function reportForm(data) {
+  return Object.fromEntries(SECCIONES.map(({ key }) => [key, data[key] || '']))
 }
 
 export default function InformePage() {
@@ -73,13 +77,7 @@ export default function InformePage() {
     getInforme(id)
       .then(({ data }) => {
         setInforme(data)
-        setForm({
-          tecnica: data.tecnica || '',
-          hallazgos: data.hallazgos || '',
-          correlacion_clinica: data.correlacion_clinica || '',
-          impresion: data.impresion || '',
-          recomendaciones: data.recomendaciones || '',
-        })
+        setForm(reportForm(data))
       })
       .catch((e) => {
         if (!e.response) toast.red()
@@ -91,13 +89,14 @@ export default function InformePage() {
   const firmado = informe?.estado === 'firmado'
 
   const handleDescargarPDF = async () => {
+    if (dirty || guardando || descargando) return
     setDescargando(true)
     try {
-      const { data: blob } = await descargarInformePDF(id)
+      const { data: blob } = await descargarInformePDF(id, !firmado)
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `Informe_${informe.paciente?.ci || id}_Estudio${informe.estudio}.pdf`
+      a.download = `${firmado ? 'Informe' : 'Preinforme'}_Estudio${informe.estudio}.pdf`
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
@@ -120,10 +119,13 @@ export default function InformePage() {
   }
 
   const guardar = async (estado) => {
+    if (guardando || firmado) return
+    if (estado === 'firmado' && (dirty || informe.estado !== 'revisado')) return
     setGuardando(estado)
     try {
-      const { data } = await updateInforme(id, { ...form, estado })
+      const { data } = await updateInforme(id, estado === 'firmado' ? { estado } : { ...form, estado })
       setInforme(data)
+      setForm(reportForm(data))
       const msg = {
         borrador: 'Borrador guardado.',
         revisado: 'Informe marcado como revisado.',
@@ -177,9 +179,8 @@ export default function InformePage() {
     <div className="clinical-report-page max-w-6xl mx-auto">
       <div className="clinical-report-heading mb-6">
         <Link to={`/analisis/${informe.estudio}`} onClick={(event) => { if (dirty && !window.confirm('Hay cambios sin guardar. ¿Salir del informe?')) event.preventDefault() }} className="inline-flex mb-3 text-sm underline text-teal-med">Volver a la radiografía y al análisis</Link>
-        <p className="clinical-eyebrow">EXPEDIENTE RADIOLÓGICO · REVISIÓN MÉDICA</p>
-        <h1 className="font-heading font-bold text-navy text-3xl tracking-tight">Informe Radiológico</h1>
-        <p className="font-body text-slate-500 text-sm mt-1">Neo Rayos X Digital · Pre-informe asistido por CNN</p>
+        <h1 className="font-heading font-bold text-navy text-3xl tracking-tight">{firmado ? 'Informe radiológico firmado' : 'Preinforme radiológico'}</h1>
+        <p className="font-body text-slate-500 text-sm mt-1">Borrador estructurado para revisión médica. Las señales de IA se muestran como apoyo y no como diagnóstico.</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[2fr_3fr] gap-6">
@@ -282,12 +283,19 @@ export default function InformePage() {
           </section>
 
           {/* Secciones del informe */}
-          {SECCIONES.map(({ key, label, rows, probs: hasProbs }) => (
-            <div key={key}>
-              <div className="flex items-center justify-between mb-1.5">
-                <label htmlFor={key} className="font-heading text-[11px] font-bold text-slate-500 tracking-widest uppercase">
-                  {label}
-                </label>
+          {SECCIONES.map(({ key, label, rows, help, probs: hasProbs }) => {
+            const complete = isCompleted(form[key])
+            return (
+            <section key={key} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <label htmlFor={key} className="font-heading text-sm font-bold text-navy">{label}</label>
+                  <p className="mt-1 text-xs leading-relaxed text-slate-500">{help}</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${complete ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                    <CheckCircle className="h-3.5 w-3.5" /> {complete ? 'Completo' : 'Pendiente'}
+                  </span>
                 {hasProbs && (
                   <button
                     onClick={() => setShowProbs((s) => !s)}
@@ -298,6 +306,7 @@ export default function InformePage() {
                     <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showProbs ? 'rotate-180' : ''}`} />
                   </button>
                 )}
+                </div>
               </div>
 
               <div className={hasProbs && showProbs ? 'grid lg:grid-cols-[1fr_auto] gap-3' : ''}>
@@ -306,12 +315,12 @@ export default function InformePage() {
                   value={form[key]}
                   onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
                   rows={rows}
-                  disabled={firmado}
+                  disabled={firmado || !!guardando}
                   className={`w-full px-4 py-3 rounded-lg border border-slate-200
                     font-body text-sm text-navy leading-relaxed resize-y bg-white transition-colors
                     focus:outline-none focus:ring-2 focus:ring-teal-med/40 focus:ring-offset-1
                     disabled:bg-slate-50 disabled:text-slate-500 disabled:resize-none
-                    ${key === 'hallazgos' ? 'whitespace-pre-wrap font-mono text-[13px]' : ''}`}
+                    ${key === 'hallazgos' ? 'whitespace-pre-wrap' : ''}`}
                 />
 
                 {/* Panel colapsable de probabilidades CNN, junto a Hallazgos */}
@@ -354,8 +363,8 @@ export default function InformePage() {
                   )}
                 </AnimatePresence>
               </div>
-            </div>
-          ))}
+            </section>
+          )})}
 
           {/* Firma */}
           <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-5">
@@ -385,18 +394,19 @@ export default function InformePage() {
               </div>
             )}
 
-            {firmado && (
+            {(
               <div className="mb-4">
                 <button
                   onClick={handleDescargarPDF}
-                  disabled={descargando}
+                  disabled={descargando || guardando || dirty}
+                  title={dirty ? 'Guarda los cambios antes de descargar el PDF' : undefined}
                   className="w-full inline-flex items-center justify-center gap-2 py-2.5 rounded-lg
                     bg-success text-white font-heading font-semibold text-sm shadow-md
                     hover:brightness-110 hover:scale-[1.01] transition-all cursor-pointer
                     disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   {descargando ? <Spinner size="sm" color="white" /> : <Download className="w-4 h-4" />}
-                  {descargando ? 'Generando PDF…' : 'Descargar informe firmado (PDF)'}
+                  {descargando ? 'Generando PDF…' : firmado ? 'Descargar informe firmado (PDF)' : 'Descargar preinforme (PDF)'}
                 </button>
               </div>
             )}

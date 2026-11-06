@@ -13,7 +13,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-neorx}
       POSTGRES_USER: ${POSTGRES_USER:-neorx}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Define POSTGRES_PASSWORD en .env.docker}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
@@ -44,6 +44,38 @@ services:
       - neorx-network
 
   # ─────────────────────────────────────────────────────────────────────────────
+  # Inicialización Django: migraciones y estáticos antes de atender tráfico.
+  # ─────────────────────────────────────────────────────────────────────────────
+  migrate:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: neorx-migrate
+    restart: "no"
+    command: sh -c "python manage.py migrate --noinput && python manage.py collectstatic --noinput && python manage.py seed_demo_users"
+    environment:
+      - DEBUG=False
+      - SECRET_KEY=${SECRET_KEY:?Define SECRET_KEY en .env.docker}
+      - FERNET_KEY=${FERNET_KEY:?Define FERNET_KEY en .env.docker}
+      - POSTGRES_DB=${POSTGRES_DB:-neorx}
+      - POSTGRES_USER=${POSTGRES_USER:-neorx}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Define POSTGRES_PASSWORD en .env.docker}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - NEORX_CREATE_DEMO_USERS=${NEORX_CREATE_DEMO_USERS:-false}
+      - NEORX_ADMIN_PASSWORD=${NEORX_ADMIN_PASSWORD:-}
+      - NEORX_MEDICO_PASSWORD=${NEORX_MEDICO_PASSWORD:-}
+      - NEORX_RECEPCIONISTA_PASSWORD=${NEORX_RECEPCIONISTA_PASSWORD:-}
+    volumes:
+      - media_files:/app/media
+      - static_files:/app/static
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - neorx-network
+
+  # ─────────────────────────────────────────────────────────────────────────────
   # Backend (Django + DRF + Celery)
   # ─────────────────────────────────────────────────────────────────────────────
   backend:
@@ -52,26 +84,44 @@ services:
       dockerfile: Dockerfile.prod
     container_name: neorx-backend
     restart: unless-stopped
+    command: gunicorn neorx.wsgi:application --bind 0.0.0.0:8000 --workers 2 --threads 2 --timeout 120
     environment:
       - DEBUG=False
-      - SECRET_KEY=${SECRET_KEY}
-      - FERNET_KEY=${FERNET_KEY}
+      - SECRET_KEY=${SECRET_KEY:?Define SECRET_KEY en .env.docker}
+      - FERNET_KEY=${FERNET_KEY:?Define FERNET_KEY en .env.docker}
       - POSTGRES_DB=${POSTGRES_DB:-neorx}
       - POSTGRES_USER=${POSTGRES_USER:-neorx}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Define POSTGRES_PASSWORD en .env.docker}
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
-      - NEORX_MODEL_PATH=/app/diagnostico/models/finetuned_resnet50_nih.pt
-      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS}
-      - ALLOWED_HOSTS=${ALLOWED_HOSTS}
+      - NEORX_MODEL_PATH=${NEORX_MODEL_PATH:-}
+      - NEORX_MODEL_CACHE=/app/diagnostico/models
+      - NEORX_BASELINE_WEIGHTS=${NEORX_BASELINE_WEIGHTS:-resnet50-res512-all}
+      - NEORX_INFERENCE_MODE=celery
+      - NEORX_DECISION_MODE=${NEORX_DECISION_MODE:-pretrained_effusion_categories}
+      - NEORX_BASELINE_MIN_SCORE=${NEORX_BASELINE_MIN_SCORE:-0.50}
+      - NEORX_CATEGORY_MARGIN=${NEORX_CATEGORY_MARGIN:-0.00}
+      - NEORX_DEMO_ORIENTATION=${NEORX_DEMO_ORIENTATION:-false}
+      - NEORX_DEMO_MIN_SCORE=${NEORX_DEMO_MIN_SCORE:-0.50}
+      - NEORX_DEMO_CATEGORY_MARGIN=${NEORX_DEMO_CATEGORY_MARGIN:-0.08}
+      - NEORX_INPUT_SIZE=${NEORX_INPUT_SIZE:-512}
+      - NEORX_TORCH_THREADS=${NEORX_TORCH_THREADS:-4}
+      - NEORX_CNN_SOFT_LIMIT=${NEORX_CNN_SOFT_LIMIT:-180}
+      - NEORX_CNN_TIME_LIMIT=${NEORX_CNN_TIME_LIMIT:-240}
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost:8080}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost,127.0.0.1}
+      - SECURE_SSL_REDIRECT=${SECURE_SSL_REDIRECT:-False}
+      - SECURE_HSTS_SECONDS=${SECURE_HSTS_SECONDS:-0}
     volumes:
       - media_files:/app/media
       - static_files:/app/static
-      - ./models:/app/diagnostico/models:ro
-      - ./logs:/app/logs
+      - ./backend/models:/app/diagnostico/models:ro
+      - logs:/app/logs
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
@@ -96,24 +146,51 @@ services:
       dockerfile: Dockerfile.prod
     container_name: neorx-celery-worker
     restart: unless-stopped
-    command: celery -A neorx worker -l INFO -Q cnn_inference -c 2 --prefetch-multiplier=1
+    # Un proceso evita cargar dos ResNet simultáneamente y mantiene latencia
+    # predecible en equipos CPU sin GPU.
+    # Pool solo mantiene el singleton en el mismo proceso que ejecuta la tarea.
+    # Con prefork el hijo cargaba ResNet otra vez y agotaba el límite inicial.
+    command: celery -A neorx worker -l INFO -Q cnn_inference -c 1 --pool=solo --prefetch-multiplier=1
+    healthcheck:
+      # El pool solo no responde a inspect mientras infiere. Comprobar PID y
+      # broker evita marcarlo enfermo durante una inferencia válida.
+      test: ["CMD-SHELL", "python -c \"import redis; assert b'celery' in open('/proc/1/cmdline','rb').read(); assert redis.from_url('redis://redis:6379/0').ping()\""]
+      interval: 30s
+      timeout: 10s
+      start_period: 45s
+      retries: 3
     environment:
       - DEBUG=False
-      - SECRET_KEY=${SECRET_KEY}
-      - FERNET_KEY=${FERNET_KEY}
+      - SECRET_KEY=${SECRET_KEY:?Define SECRET_KEY en .env.docker}
+      - FERNET_KEY=${FERNET_KEY:?Define FERNET_KEY en .env.docker}
       - POSTGRES_DB=${POSTGRES_DB:-neorx}
       - POSTGRES_USER=${POSTGRES_USER:-neorx}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Define POSTGRES_PASSWORD en .env.docker}
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
-      - NEORX_MODEL_PATH=/app/diagnostico/models/finetuned_resnet50_nih.pt
+      - NEORX_MODEL_PATH=${NEORX_MODEL_PATH:-}
+      - NEORX_MODEL_CACHE=/app/diagnostico/models
+      - NEORX_BASELINE_WEIGHTS=${NEORX_BASELINE_WEIGHTS:-resnet50-res512-all}
+      - NEORX_INFERENCE_MODE=celery
+      - NEORX_DECISION_MODE=${NEORX_DECISION_MODE:-pretrained_effusion_categories}
+      - NEORX_BASELINE_MIN_SCORE=${NEORX_BASELINE_MIN_SCORE:-0.50}
+      - NEORX_CATEGORY_MARGIN=${NEORX_CATEGORY_MARGIN:-0.00}
+      - NEORX_DEMO_ORIENTATION=${NEORX_DEMO_ORIENTATION:-false}
+      - NEORX_DEMO_MIN_SCORE=${NEORX_DEMO_MIN_SCORE:-0.50}
+      - NEORX_DEMO_CATEGORY_MARGIN=${NEORX_DEMO_CATEGORY_MARGIN:-0.08}
+      - NEORX_INPUT_SIZE=${NEORX_INPUT_SIZE:-512}
+      - NEORX_TORCH_THREADS=${NEORX_TORCH_THREADS:-4}
+      - NEORX_CNN_SOFT_LIMIT=${NEORX_CNN_SOFT_LIMIT:-180}
+      - NEORX_CNN_TIME_LIMIT=${NEORX_CNN_TIME_LIMIT:-240}
     volumes:
       - media_files:/app/media
-      - ./models:/app/diagnostico/models:ro
-      - ./logs:/app/logs
+      - ./backend/models:/app/diagnostico/models:ro
+      - logs:/app/logs
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
@@ -124,7 +201,7 @@ services:
       resources:
         limits:
           memory: 4G
-          cpus: "2"
+          cpus: "4"
         reservations:
           memory: 2G
           cpus: "1"
@@ -139,18 +216,24 @@ services:
     container_name: neorx-celery-beat
     restart: unless-stopped
     command: celery -A neorx beat -l INFO
+    # Beat no expone HTTP; el healthcheck HTTP heredado de la imagen backend
+    # produciría un falso "unhealthy" aunque el planificador esté ejecutándose.
+    healthcheck:
+      disable: true
     environment:
       - DEBUG=False
-      - SECRET_KEY=${SECRET_KEY}
-      - FERNET_KEY=${FERNET_KEY}
+      - SECRET_KEY=${SECRET_KEY:?Define SECRET_KEY en .env.docker}
+      - FERNET_KEY=${FERNET_KEY:?Define FERNET_KEY en .env.docker}
       - POSTGRES_DB=${POSTGRES_DB:-neorx}
       - POSTGRES_USER=${POSTGRES_USER:-neorx}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Define POSTGRES_PASSWORD en .env.docker}
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
@@ -167,12 +250,14 @@ services:
       dockerfile: Dockerfile.prod
     container_name: neorx-frontend
     restart: unless-stopped
+    ports:
+      - "${NEORX_HTTP_PORT:-8080}:80"
     volumes:
-      - static_files:/usr/share/nginx/html/static
+      - static_files:/usr/share/nginx/static:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
-      - ./ssl:/etc/nginx/ssl:ro
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     networks:
       - neorx-network
     deploy:
@@ -185,6 +270,7 @@ services:
   # Nginx Reverse Proxy (SSL Termination)
   # ─────────────────────────────────────────────────────────────────────────────
   nginx:
+    profiles: ["tls"]
     image: nginx:alpine
     container_name: neorx-nginx
     restart: unless-stopped
@@ -211,6 +297,7 @@ volumes:
   redis_data:
   media_files:
   static_files:
+  logs:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Networks

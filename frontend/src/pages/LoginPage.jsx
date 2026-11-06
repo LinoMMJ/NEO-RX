@@ -73,10 +73,10 @@ export default function LoginPage() {
             </p>
             <div className="mt-8 flex flex-col gap-2 text-left max-w-xs mx-auto">
               {[
-                'ResNet-50 · 25.5M parámetros',
+                'Análisis radiográfico asistido',
                 'Acceso seguro según el rol del usuario',
-                'Grad-CAM para explicabilidad',
-                'PadChest · NIH · RSNA · SIIM · VinBigData',
+                'Mapa de calor para explicabilidad',
+                'Resultados centralizados por estudio',
               ].map((line) => (
                 <div key={line} className="flex items-center gap-2 font-mono text-xs text-white/40">
                   <span className="w-1.5 h-1.5 rounded-full bg-teal-med flex-shrink-0" />

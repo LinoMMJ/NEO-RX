@@ -1,5 +1,5 @@
 """
-Validadores robustos para archivos DICOM y PNG.
+Validadores robustos para archivos DICOM e imágenes radiográficas raster.
 Incluye validación de MIME type, tamaño, integridad y contenido.
 """
 
@@ -23,8 +23,10 @@ ALLOWED_IMAGE_MIME_TYPES = [
     'image/jpeg',
     'image/jpg',
     'image/webp',
+    'image/tiff',
+    'image/bmp',
 ]
-ALLOWED_EXTENSIONS = ['.dcm', '.dicom', '.png', '.jpg', '.jpeg', '.webp']
+ALLOWED_EXTENSIONS = ['.dcm', '.dicom', '.png', '.jpg', '.jpeg', '.webp', '.tif', '.tiff', '.bmp']
 
 # Umbral de borrosidad configurable
 BLUR_THRESHOLD = getattr(settings, 'BLUR_THRESHOLD', 100.0)
@@ -76,12 +78,20 @@ def validate_mime_type(file_obj, expected_types: list) -> str:
         mime_type = 'image/jpeg'
     elif header.startswith(b'RIFF') and header[8:12] == b'WEBP':
         mime_type = 'image/webp'
+    elif header.startswith((b'II*\x00', b'MM\x00*')):
+        mime_type = 'image/tiff'
+    elif header.startswith(b'BM'):
+        mime_type = 'image/bmp'
     elif os.path.splitext(file_obj.name.lower())[1] in ['.dcm', '.dicom']:
         # Headerless DICOM must still pass structural and pixel decoding checks.
         mime_type = 'application/octet-stream'
     else:
         raise FileValidationError('Contenido de archivo no reconocido.', code='invalid_mime_type')
-    extension_mimes = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp'}
+    extension_mimes = {
+        '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+        '.webp': 'image/webp', '.tif': 'image/tiff', '.tiff': 'image/tiff',
+        '.bmp': 'image/bmp',
+    }
     ext = os.path.splitext(file_obj.name.lower())[1]
     if ext in extension_mimes and extension_mimes[ext] != mime_type:
         raise FileValidationError('La extensión no corresponde al contenido.', code='invalid_extension')
@@ -120,7 +130,7 @@ def validate_dicom_integrity(file_obj) -> tuple:
 
 def validate_image_integrity(file_obj, mime_type: str) -> tuple:
     """
-    Valida que el archivo de imagen (PNG/JPG/WebP) sea válido y legible.
+    Valida que el archivo raster (PNG/JPG/WebP/TIFF/BMP) sea válido y legible.
     Retorna (imagen_pil, error_message).
     """
     file_obj.seek(0)

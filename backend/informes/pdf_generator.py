@@ -21,7 +21,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import cm
 from reportlab.platypus import (
-    Paragraph, Spacer, Table, TableStyle, HRFlowable, KeepTogether,
+    Paragraph, Spacer, Table, TableStyle, HRFlowable, KeepTogether, Image, PageBreak,
 )
 from reportlab.pdfgen import canvas as pdfcanvas
 from reportlab.pdfbase.pdfmetrics import stringWidth
@@ -145,11 +145,43 @@ def _draw_footer(canvas, doc):
     canvas.saveState()
     canvas.setFont("Helvetica", 8)
     canvas.setFillColor(colors.HexColor("#94a3b8"))
+    if getattr(doc, "es_borrador", False):
+        canvas.drawCentredString(A4[0] / 2, A4[1] - 1.1 * cm, "PREINFORME NO FIRMADO - PENDIENTE DE REVISIÓN MÉDICA")
     canvas.drawCentredString(
         A4[0] / 2, 1.2 * cm,
         "Informe generado por Sistema Neo RX - Apoyo a la Interpretación Radiológica | Página {}".format(doc.page)
     )
     canvas.restoreState()
+
+
+def _imagen_pdf(imagen):
+    """Lee la vista normalizada o reconstruye una copia desde el original."""
+    if imagen is None:
+        return None
+    from PIL import Image as PILImage, ImageOps
+    from estudios.views import _dicom_a_png, _raster_a_png
+    sources = []
+    if imagen.archivo_png:
+        sources.append(lambda: imagen.archivo_png.open("rb"))
+    if imagen.archivo_dicom:
+        def original():
+            path = imagen.archivo_dicom.path
+            converter = _dicom_a_png if path.lower().endswith((".dcm", ".dicom")) else _raster_a_png
+            return converter(path)[0]
+        sources.append(original)
+    for source in sources:
+        try:
+            with source() as stream, PILImage.open(stream) as loaded:
+                picture = ImageOps.exif_transpose(loaded).convert("RGB")
+                picture.thumbnail((2000, 2000))
+                data = BytesIO()
+                picture.save(data, format="PNG")
+                data.seek(0)
+                scale = min(15 * cm / picture.width, 19 * cm / picture.height)
+                return Image(data, width=picture.width * scale, height=picture.height * scale)
+        except (OSError, ValueError):
+            continue
+    return None
 
 
 def generar_pdf_informe(informe, contexto=None) -> BytesIO:
@@ -168,6 +200,10 @@ def generar_pdf_informe(informe, contexto=None) -> BytesIO:
     styles = _build_styles()
 
     estudio = informe.estudio
+    es_borrador = informe.estado != "firmado"
+    imagen = informe.imagen_origen or estudio.imagenes.order_by("-fecha_subida").first()
+    if imagen and imagen.estudio_id != estudio.pk:
+        imagen = None
     paciente = estudio.paciente
     medico = informe.medico
     medico_nombre = contexto.get("medico_nombre") or (medico.get_full_name() if medico else None)
@@ -177,14 +213,12 @@ def generar_pdf_informe(informe, contexto=None) -> BytesIO:
     fecha_hoy = contexto.get("fecha_hoy") or datetime.today().strftime("%d/%m/%Y")
     estudio_fecha = contexto.get("estudio_fecha") or estudio.fecha.strftime("%d/%m/%Y")
     edad = contexto.get("edad") or _edad(paciente)
-    proyeccion = contexto.get("proyeccion") or getattr(
-        informe.imagen_origen or estudio.imagenes.first(), "tipo_proyeccion", "No registrada"
-    )
+    proyeccion = contexto.get("proyeccion") or getattr(imagen, "tipo_proyeccion", "No registrada")
 
     story = []
 
     # ── Encabezado ──
-    story.append(Paragraph("INFORME RADIOLÓGICO", styles["title"]))
+    story.append(Paragraph("PREINFORME NO FIRMADO" if es_borrador else "INFORME RADIOLÓGICO", styles["title"]))
     story.append(Paragraph("Centro: Neo Rayos X Digital — La Paz, Bolivia", styles["subtitle"]))
     story.append(Paragraph(
         "Fecha emisión: {} | Informe N°: {} | Estado: {}".format(
@@ -212,7 +246,7 @@ def generar_pdf_informe(informe, contexto=None) -> BytesIO:
             Paragraph(label, styles["info_label"]),
             Paragraph(_sanitize(value), styles["info_value"]),
         ])
-    tabla = Table(rows, colWidths=[3.5 * cm, 13 * cm])
+    tabla = Table(rows, colWidths=[3.5 * cm, 12.5 * cm])
     tabla.setStyle(TableStyle([
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("LEFTPADDING", (0, 0), (-1, -1), 2),
@@ -240,8 +274,8 @@ def generar_pdf_informe(informe, contexto=None) -> BytesIO:
 
     # ── Advertencia IA ──
     story.append(Paragraph(
-        "<b>⚠ ADVERTENCIA IMPORTANTE:</b> Este informe constituye un apoyo preliminar "
-        "para la interpretación radiológica basado en análisis asistido por IA (CNN ResNet-50). "
+        "<b>APOYO DE INTELIGENCIA ARTIFICIAL:</b> Este informe constituye un apoyo preliminar "
+        "para la interpretación radiológica basado en análisis asistido por IA (CNN preentrenada). "
         "No sustituye la evaluación, validación y firma del médico radiólogo especialista. "
         "Los hallazgos y probabilidades son estimaciones asistidas por computadora y requieren "
         "correlación clínica obligatoria por parte del profesional médico responsable.",
@@ -265,7 +299,22 @@ def generar_pdf_informe(informe, contexto=None) -> BytesIO:
         ("LINEABOVE", (0, 0), (-1, 0), 0.8, colors.HexColor("#475569")),
         ("ALIGN", (0, 0), (-1, -1), "CENTER"),
     ]))
-    story.append(firma)
+    if es_borrador:
+        story.append(Paragraph("Documento sin firma médica. Pendiente de revisión y validación.", styles["body"]))
+    else:
+        story.append(firma)
+
+    # Anexo: nunca sustituir la imagen de origen por otra de un estudio distinto.
+    radiografia = _imagen_pdf(imagen)
+    if radiografia is not None:
+        story.extend([
+            PageBreak(),
+            Paragraph("IMAGEN DEL ESTUDIO", styles["section"]),
+            Paragraph(f"Estudio {estudio.pk} · Imagen {imagen.pk}. Vista de referencia; consulte el original en el visor.", styles["body"]),
+            radiografia,
+        ])
+    else:
+        story.append(Paragraph("Imagen de referencia no disponible. Consulte el archivo original del estudio.", styles["body"]))
 
     # ── Construir documento ──
     buffer = BytesIO()
@@ -285,6 +334,7 @@ def generar_pdf_informe(informe, contexto=None) -> BytesIO:
         title="Informe Radiológico - {}".format(estudio.id),
         author="Neo Rayos X Digital",
     )
+    doc.es_borrador = es_borrador
     doc.build(story, onFirstPage=_draw_footer, onLaterPages=_draw_footer)
     buffer.seek(0)
     return buffer

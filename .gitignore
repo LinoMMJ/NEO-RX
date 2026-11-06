@@ -10,6 +10,8 @@ venv/
 .venv/
 env/
 ENV/
+backend/.test-venv*/
+backend/.audit-venv/
 
 # Django
 *.log
@@ -22,6 +24,8 @@ media/
 # Secrets / environment
 .env
 .env.local
+.env.docker
+.env.production
 .env.*.local
 !.env.example
 
@@ -66,6 +70,24 @@ data/
 skills-lock.json
 # Private migration rollback copies
 backend/.backups/
+backend/.pytest-*/
+backend/.pytest_tmp*/
+.preflight-temp/
+
+# Local Codex/Word workspaces and generated academic artifacts
+/.codex-*/
+/.run-local/
+/--pages-dir/
+/tmp/
+/qa/
+/contact_sheets/
+/documentos/
+/entrega_presentacion/
+/entrega_kaggle/
+/tools/
+/PROYECTO_GRADO_*.docx
+/*.zip
+/tmp_hf_rows.json
 
 # Training outputs
 backend/training/checkpoints/
@@ -80,6 +102,7 @@ docs/**/*.txt
 docs/**/*.xml
 docs/**/*.diff
 docs/**/*.png
+docs/**/*.jpg
 docs/**/*.json
 docs/**/*.cjs
 docs/**/*.pdf

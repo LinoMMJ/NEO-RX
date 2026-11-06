@@ -25,12 +25,12 @@ const FEATURES = [
   {
     icon: BrainCircuit,
     title: 'Detección CNN en segundos',
-    text: 'ResNet-50 con 50 capas residuales analiza cada radiografía en menos de 10 segundos.',
+    text: 'Analiza cada radiografía torácica y genera una orientación acompañada de mapa de calor.',
   },
   {
     icon: LungIcon,
-    title: 'Hallazgos neumológicos configurables',
-    text: 'Puntuaciones por hallazgo, umbrales validados y mapas Grad-CAM como apoyo a la revisión profesional.',
+    title: 'Clasificación por categorías clínicas',
+    text: 'Selecciona una sola categoría principal entre tumoral, pleural, infecciosa e intersticial, con abstención cuando la evidencia es insuficiente.',
   },
   {
     icon: FileText,
@@ -40,12 +40,13 @@ const FEATURES = [
 ]
 
 // Datos de ejemplo para el mockup de la sección demo
-const DEMO_PATOLOGIAS = [
-  { nombre: 'Neumonía', prob: 0.78, tag: 'CRÍTICO', cls: 'from-danger to-rose-400', tcls: 'text-danger' },
-  { nombre: 'Consolidación', prob: 0.54, tag: 'MODERADO', cls: 'from-orange-400 to-orange-500', tcls: 'text-orange-500' },
-  { nombre: 'Infiltrado', prob: 0.31, tag: 'LEVE', cls: 'from-warning to-amber-400', tcls: 'text-warning' },
-  { nombre: 'Derrame pleural', prob: 0.12, tag: 'MARGINAL', cls: 'from-slate-400 to-slate-500', tcls: 'text-slate-400' },
+const DEMO_PATOLOGIAS_PLEURALES = [
+  { nombre: 'Derrame pleural', prob: 0.82, cls: 'from-teal-med to-cyan-500' },
+  { nombre: 'Neumotórax', prob: 0.12, cls: 'from-slate-500 to-slate-400' },
+  { nombre: 'Engrosamiento pleural', prob: 0.08, cls: 'from-slate-500 to-slate-400' },
 ]
+
+const DEMO_CATEGORIAS = ['Tumoral', 'Pleural', 'Infecciosa', 'Intersticial']
 
 export default function LandingPage() {
   const navigate = useNavigate()
@@ -134,7 +135,7 @@ export default function LandingPage() {
             </div>
 
             <div className="mt-10 flex flex-wrap gap-x-6 gap-y-2 font-mono text-[11px] text-white/35">
-              {['ResNet-50 · 25.5M parámetros', 'Grad-CAM explicable', 'PadChest · NIH · RSNA · SIIM'].map((t) => (
+              {['Análisis asistido', 'Mapa de calor explicable', 'Flujo clínico integrado'].map((t) => (
                 <span key={t} className="flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-teal-med" />{t}
                 </span>
@@ -251,33 +252,39 @@ export default function LandingPage() {
             <div className="flex flex-col gap-4">
               <div className="rounded-2xl border border-slate-200 p-5">
                 <div className="flex items-baseline justify-between mb-3">
-                  <h3 className="font-heading font-bold text-base">Confianza diagnóstica</h3>
-                  <span className="font-mono font-bold text-2xl text-danger">78%</span>
+                  <h3 className="font-heading font-bold text-base">Categoría principal</h3>
+                  <span className="font-heading font-bold text-xl text-teal-med">Pleural</span>
                 </div>
-                <div className="w-full h-5 bg-slate-100 rounded-full overflow-hidden">
-                  <motion.div
-                    className="h-full rounded-full bg-gradient-to-r from-danger to-rose-400"
-                    initial={{ width: 0 }}
-                    whileInView={{ width: '78%' }}
-                    viewport={{ once: true }}
-                    transition={{ duration: 1.2, ease: 'easeOut' }}
-                  />
+                <div className="grid grid-cols-2 gap-2">
+                  {DEMO_CATEGORIAS.map((categoria) => (
+                    <span
+                      key={categoria}
+                      className={`rounded-lg border px-3 py-2 text-center text-xs font-semibold ${
+                        categoria === 'Pleural'
+                          ? 'border-teal-med bg-teal-med/10 text-teal-med'
+                          : 'border-slate-200 bg-slate-50 text-slate-500'
+                      }`}
+                    >
+                      {categoria}
+                    </span>
+                  ))}
                 </div>
                 <p className="mt-3 text-sm text-slate-600">
-                  Hallazgo principal: <span className="font-heading font-bold text-danger">Neumonía</span>
+                  El sistema muestra únicamente las señales que pertenecen a la categoría seleccionada.
                 </p>
+                <p className="mt-2 text-xs leading-relaxed text-slate-500">Si dos categorías quedan demasiado próximas o no superan la política validada, el resultado se marca como no concluyente y requiere revisión médica.</p>
               </div>
 
               <div className="rounded-2xl border border-slate-200 p-5">
-                <h3 className="font-heading font-bold text-base mb-4">Hallazgos detectados</h3>
+                <h3 className="font-heading font-bold text-base mb-1">Señales dentro de la categoría pleural</h3>
+                <p className="mb-4 text-xs text-slate-500">Puntuaciones internas del modelo; no equivalen a una certeza diagnóstica.</p>
                 <div className="space-y-3">
-                  {DEMO_PATOLOGIAS.map(({ nombre, prob, tag, cls, tcls }, i) => (
+                  {DEMO_PATOLOGIAS_PLEURALES.map(({ nombre, prob, cls }, i) => (
                     <div key={nombre}>
                       <div className="flex items-center gap-2 mb-1">
                         <span className="text-sm font-semibold text-navy flex-1">{nombre}</span>
-                        <span className={`text-[10px] font-mono font-bold ${tcls}`}>{tag}</span>
-                        <span className="font-mono text-sm font-bold text-slate-700 w-10 text-right">
-                          {Math.round(prob * 100)}%
+                        <span className="font-mono text-sm font-bold tabular-nums text-slate-700 w-16 text-right">
+                          {(prob * 100).toFixed(1)}/100
                         </span>
                       </div>
                       <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">

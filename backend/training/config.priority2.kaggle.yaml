@@ -1,0 +1,60 @@
+# Selected using TRAIN metadata from results.zip (112120 images, 30805 patients).
+# One displayed finding plus four independently supervised category outputs.
+data:
+  data_dir: /kaggle/input/datasets
+  manifest: /kaggle/working/manifests-priority2/clean_manifest.csv
+  splits_json: /kaggle/working/manifests-priority2/splits.json
+  processed_dir: /kaggle/working/processed-priority2
+model:
+  base_weights: resnet50-res512-all
+  num_classes: 5
+  checkpoint_dir: /kaggle/working/checkpoints-priority2
+  checkpoint_name: neorx_effusion_categories_resnet50.pt
+target_labels: [Effusion, CategoryTumoral, CategoryPleural, CategoryInfectious, CategoryInterstitial]
+labels_es:
+  Effusion: Derrame pleural
+  CategoryTumoral: Orientación tumoral
+  CategoryPleural: Orientación pleural
+  CategoryInfectious: Orientación infecciosa
+  CategoryInterstitial: Orientación intersticial
+decision_strategy:
+  type: priority_then_category_v1
+  primary_labels: [Effusion]
+  category_margin: 0.10
+train:
+  epochs_head: 3
+  epochs_finetune: 18
+  lr_head: 1.0e-3
+  lr_finetune: 1.0e-4
+  weight_decay: 1.0e-4
+  batch_size: 16
+  num_workers: 4
+  mixed_precision: true
+  early_stopping_patience: 6
+  grad_clip: 1.0
+  seed: 42
+  log_dir: /kaggle/working/runs-priority2
+  use_pos_weight: true
+  selection_metric: primary_average_precision
+augmentation:
+  enabled: true
+  rotation_degrees: 5
+  scale_range: 0.10
+  brightness: 0.15
+  contrast: 0.15
+  gaussian_noise_std: 0.01
+  horizontal_flip: false
+threshold:
+  method: precision_recall_guarded
+  target_precision: 0.90
+  min_sensitivity: 0.60
+  min_predictions: 30
+  min_positive_support: 100
+  min_threshold: 0.05
+  max_threshold: 0.99
+safety:
+  require_full_dataset: true
+experiment:
+  name: neorx_effusion_categories_v1
+  description: Effusion priority with category fallback and abstention
+  tags: [effusion, categories4, multi-label, abstention]

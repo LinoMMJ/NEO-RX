@@ -1,8 +1,9 @@
 import api from './axios'
 
-export const uploadDicom = (formData, onUploadProgress) =>
+export const uploadDicom = (formData, onUploadProgress, signal) =>
   api.post('/estudios/upload/', formData, {
     onUploadProgress,
+    signal,
     // El navegador genera Content-Type junto con el boundary multipart.
     // La inferencia local usa CPU. No cancelar a los 30 s: Django sigue
     // procesando aunque Axios abandone la respuesta y se crean reintentos
@@ -19,10 +20,11 @@ export const previsualizarDicom = (archivo) => {
 export const registrarEstudioSinIA = (formData, onUploadProgress) =>
   uploadDicom(formData, onUploadProgress)
 
-export const obtenerEstadoTarea = (taskId) =>
-  api.get(`/estudios/tarea/${taskId}/`)
+export const obtenerEstadoTarea = (taskId, signal) =>
+  api.get(`/estudios/tarea/${taskId}/`, { signal, timeout: 10000 })
 
 export const getImagenDetalle = (id) => api.get(`/estudios/imagen/${id}/`)
+export const reintentarImagen = (id) => api.post(`/estudios/imagen/${id}/reintentar/`)
 
 export const getGradCAM = (imagenId, pathology = null, signal) =>
   api.get('/diagnostico/gradcam/', {

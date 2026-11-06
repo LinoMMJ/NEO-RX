@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { Brain, Download } from 'lucide-react'
+import { Download } from 'lucide-react'
 import ListaPatologias from './ListaPatologias'
 import VisorImagen from './VisorImagen'
 import Button from '../ui/Button'
@@ -21,12 +21,6 @@ export default function PanelResultados({
   const patologias = Array.isArray(rawPatologias?.hallazgos)
     ? Object.fromEntries(rawPatologias.hallazgos.map((item) => [item.etiqueta, Number(item.probabilidad_estimada)]))
     : rawPatologias
-  const modelName = resultado?.modelo || rawPatologias?.modelo || 'Modelo CNN'
-  const denseNet = modelName.toLowerCase().includes('densenet')
-  const modelLabel = denseNet ? 'DenseNet-121' : modelName.toLowerCase().includes('resnet') ? 'ResNet-50' : modelName
-  const modelParams = denseNet ? '≈8.0 M' : modelName.toLowerCase().includes('resnet') ? '≈25.5 M' : '—'
-  const inputResolution = resultado?.resolucion_entrada
-
   const handleGenerarInforme = async () => {
     setGenerando(true)
     try {
@@ -65,6 +59,7 @@ export default function PanelResultados({
           esNitida={resultado?.es_nitida}
           varianza={resultado?.varianza_laplaciana}
           patologias={patologias}
+          objetivosGradcam={(resultado?.enfoque || rawPatologias?.enfoque)?.objetivos_gradcam}
           patologiaSeleccionada={patologiaSeleccionada}
           onPatologiaChange={onPatologiaChange}
         />
@@ -73,30 +68,14 @@ export default function PanelResultados({
       {/* Panel derecho — Datos CNN */}
       <div className="flex flex-col gap-4">
         {/* Lista de patologías */}
-        <ListaPatologias patologias={patologias} hallazgos={resultado?.hallazgos || rawPatologias?.hallazgos || []} />
-        {resultado?.advertencias_modelo?.map((message) => <p key={message} role="alert" className="rounded-xl border border-warning/40 bg-warning/10 p-3 text-sm text-navy">{message}</p>)}
-
-        {/* Sobre este análisis */}
-        <div className="bg-teal-med/5 border border-teal-med/20 rounded-xl p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <Brain className="w-4 h-4 text-teal-med" />
-            <h4 className="font-heading font-bold text-navy text-sm">Análisis por Red Neuronal Convolucional</h4>
-          </div>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1 font-body text-xs text-slate-600">
-            <span className="text-slate-400">Arquitectura</span><span className="font-semibold">{modelLabel}</span>
-            <span className="text-slate-400">Parámetros</span><span className="font-mono">{modelParams}</span>
-            <span className="text-slate-400">Tiempo inferencia</span><span className="font-mono">{resultado?.tiempo_inferencia_seg}s</span>
-            <span className="text-slate-400">Resolución</span><span className="font-mono">{inputResolution ? `${inputResolution}×${inputResolution} px` : 'No registrada'}</span>
-            <span className="text-slate-400">Tipo de modelo</span><span className="font-mono">{resultado?.es_fine_tuned ? 'Ajustado con NIH' : 'Baseline preentrenado'}</span>
-            <span className="text-slate-400">Pesos</span><span className="break-all">{modelName}</span>
-            <span className="text-slate-400">Visualización</span><span>Grad-CAM</span>
-          </div>
-          <p className="mt-3 font-body text-xs text-slate-500 italic border-t border-teal-med/10 pt-2">
-            El mapa de calor señala las regiones que más influyeron en la puntuación del modelo.
-            Es una ayuda visual experimental y requiere interpretación por un profesional médico.
-          </p>
-        </div>
-
+        <ListaPatologias
+          patologias={patologias}
+          hallazgos={resultado?.hallazgos || rawPatologias?.hallazgos || []}
+          decision={resultado?.decision || rawPatologias?.decision}
+          categoria={resultado?.categoria || rawPatologias?.categoria}
+          enfoque={resultado?.enfoque || rawPatologias?.enfoque}
+          alcance={resultado?.alcance_modelo || rawPatologias?.alcance || []}
+        />
         {/* Acciones */}
         <div className="flex gap-3">
           {rol === 'medico' && !informeId && (

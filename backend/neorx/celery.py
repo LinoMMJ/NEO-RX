@@ -19,7 +19,7 @@ def precargar_modelo(**kwargs):
     import time
     try:
         from diagnostico.services import DetectorTorax
-        logger.info("[CELERY WORKER] Precargando modelo ResNet-50...")
+        logger.info("[CELERY WORKER] Precargando modelo CNN configurado...")
         t0 = time.time()
         DetectorTorax.cargar()
         logger.info(f"[CELERY WORKER] Modelo listo en {time.time() - t0:.1f}s")

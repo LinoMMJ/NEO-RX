@@ -140,6 +140,21 @@ def test_audit_redacts_secrets():
     assert AuditLog.objects.get(resource_type='unit').metadata == {'refresh_token':'[REDACTED]', 'nested': {'password':'[REDACTED]'}}
 
 
+def test_metrics_exclude_unvalidated_scores(auth_medico, imagen_con_resultado):
+    from diagnostico.models import ResultadoCNN
+    result = ResultadoCNN.objects.get(imagen=imagen_con_resultado)
+    result.patologias = {'hallazgos': [
+        {'etiqueta': 'Edema pulmonar', 'probabilidad_estimada': 0.99,
+         'threshold_usado': 0.8, 'decision_habilitada': False},
+        {'etiqueta': 'Derrame pleural', 'probabilidad_estimada': 0.9,
+         'threshold_usado': 0.8, 'decision_habilitada': True},
+    ]}
+    result.save()
+    response = auth_medico.get('/api/metrics/operacionales/')
+    assert response.status_code == 200
+    assert response.data['top_patologias'] == [{'nombre': 'Derrame pleural', 'conteo': 1}]
+
+
 @pytest.mark.parametrize('url', ['/api/pacientes/', '/api/pacientes/estudios/', '/api/estudios/imagenes/', '/api/informes/', '/api/metrics/operacionales/'])
 def test_critical_lists_authenticated(url, auth_medico, api_client):
     assert APIClient().get(url).status_code == 401
@@ -220,11 +235,19 @@ def test_upload_rbac(role, imagen_dicom):
 
 def test_structured_results_draft(auth_medico, imagen_con_resultado):
     result=imagen_con_resultado.resultado_cnn
-    result.patologias={'hallazgos':[{'etiqueta':'Neumonía','probabilidad_estimada':0.8}], 'probabilidades':{'Pneumonia':0.8}}
+    result.patologias={
+        'hallazgos': [{
+            'patologia_en': 'Effusion',
+            'etiqueta': 'Derrame pleural',
+            'probabilidad_estimada': 0.9,
+            'threshold_usado': 0.82421875,
+        }],
+        'probabilidades': {'Effusion': 0.9},
+    }
     result.save()
     response=auth_medico.post('/api/informes/generar/',{'estudio_id':imagen_con_resultado.estudio_id})
-    assert response.status_code==200 and 'Neumonía' in response.data['hallazgos']
-    assert response.data['probabilidades']=={'Neumonía':0.8}
+    assert response.status_code==200 and 'Derrame pleural' in response.data['hallazgos']
+    assert response.data['probabilidades']=={'Derrame pleural':0.9}
     assert 'Silueta cardíaca' not in response.data['hallazgos']
 
 
@@ -261,6 +284,31 @@ def test_upload_dispatches_once(auth_recepcionista, imagen_dicom, settings, tmp_
             'archivo':SimpleUploadedFile('valid.png',png_bytes())})
     assert response.status_code==202 and response.data['task_id']=='mock-task'
     assert delay.call_count==1
+
+
+def test_upload_thread_returns_immediately(auth_recepcionista, imagen_dicom, settings, tmp_path):
+    settings.MEDIA_ROOT=tmp_path
+    settings.NEORX_INFERENCE_MODE='thread'
+    from estudios.classification import ImageSuitability
+    chest=ImageSuitability("chest_xray",True,True,"Torax",0.99,"test","Radiografia de torax.",{})
+    with patch('estudios.views.classify_medical_image',return_value=chest), \
+         patch('estudios.views.calcular_borrosidad',return_value=(True,150)), \
+         patch('diagnostico.local_queue.enqueue_local_inference',return_value='local-77') as enqueue:
+        response=auth_recepcionista.post('/api/estudios/upload/',{'estudio_id':imagen_dicom.estudio_id,
+            'archivo':SimpleUploadedFile('valid.png',png_bytes())})
+    assert response.status_code==202 and response.data['status']=='procesando'
+    assert response.data['task_id']=='local-77'
+    enqueue.assert_called_once()
+
+
+def test_local_task_poll_returns_saved_result(auth_medico, imagen_con_resultado):
+    image = imagen_con_resultado
+    image.estado_procesamiento = 'procesado'
+    image.save(update_fields=['estado_procesamiento'])
+    response = auth_medico.get(f'/api/estudios/tarea/local-{image.pk}/')
+    assert response.status_code == 200
+    assert response.data['status'] == 'SUCCESS'
+    assert response.data['imagen_id'] == image.pk
 
 
 def test_upload_inline_returns_result_without_celery(auth_recepcionista, imagen_dicom, settings, tmp_path):

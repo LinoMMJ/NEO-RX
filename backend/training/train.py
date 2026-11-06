@@ -46,6 +46,7 @@ from training.model import (
     unfreeze_partial,
 )
 from training.threshold_optimizer import ThresholdOptimizer, save_thresholds_csv
+from training.session import BudgetExpired, check_deadline, resume_signature
 
 
 def parse_args():
@@ -75,6 +76,8 @@ def parse_args():
         default=None,
         help="Limit samples for quick pipeline test (e.g., 2000). NOT for final results.",
     )
+    parser.add_argument('--max-hours', type=float, default=0,
+                        help='Stop safely at a batch boundary; 0 means unlimited. Resume repeats an unfinished epoch.')
     return parser.parse_args()
 
 
@@ -142,6 +145,7 @@ def validate(
     device: torch.device,
     use_amp: bool,
     criterion: Optional[nn.Module] = None,
+    deadline=None,
 ) -> Tuple[float, List[float], float, np.ndarray, np.ndarray]:
     """
     Run validation, return (loss, per_class_aucs, macro_auc, all_targets, all_probs).
@@ -159,6 +163,7 @@ def validate(
 
     with torch.no_grad():
         for images, targets, _ in loader:
+            check_deadline(deadline)
             images = images.to(device, non_blocking=True)
             targets = targets.to(device, non_blocking=True)
 
@@ -197,13 +202,21 @@ def train_one_epoch(
     grad_clip: float,
     epoch: int,
     writer: SummaryWriter,
+    deadline=None,
 ) -> float:
     """Train one epoch, return average loss."""
     model.train()
+    # Frozen backbone BatchNorm statistics must not drift during head training.
+    for module in model.modules():
+        if isinstance(module, nn.modules.batchnorm._BatchNorm) and not any(
+            parameter.requires_grad for parameter in module.parameters()
+        ):
+            module.eval()
     total_loss = 0.0
     n_batches = 0
 
     for batch_idx, (images, targets, _) in enumerate(loader):
+        check_deadline(deadline)
         images = images.to(device, non_blocking=True)
         targets = targets.to(device, non_blocking=True)
 
@@ -229,6 +242,9 @@ def train_one_epoch(
 
         total_loss += loss.item()
         n_batches += 1
+
+        if batch_idx % 100 == 0:
+            print(f'Epoch {epoch}: batch {batch_idx + 1}/{len(loader)} loss={loss.item():.4f}', flush=True)
 
         # Log batch loss
         global_step = epoch * len(loader) + batch_idx
@@ -321,6 +337,9 @@ def _threshold_list(value, labels):
 def main():
     args = parse_args()
     cfg = load_config(args.config)
+    if args.max_hours < 0:
+        raise ValueError('--max-hours must be non-negative')
+    deadline = time.monotonic() + args.max_hours * 3600 if args.max_hours else None
     device = get_device(args.device)
     if args.device == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("CUDA was requested but is not available")
@@ -329,6 +348,12 @@ def main():
     if device.type == "cuda":
         print(f"GPU: {torch.cuda.get_device_name(0)}")
     print(f"Config: {args.config}")
+
+    if args.max_samples and cfg.get("safety", {}).get("require_full_dataset", False):
+        raise ValueError(
+            "This configuration is reserved for the final full-data run; "
+            "remove --max-samples or use a separate pilot configuration."
+        )
 
     data_dir = Path(cfg["data"]["data_dir"])
     splits_json = Path(cfg["data"]["splits_json"])
@@ -345,7 +370,13 @@ def main():
     print(f"Training with {num_classes} classes: {labels}")
 
     resume = load_checkpoint(args.resume) if args.resume else None
+    signature = resume_signature(cfg)
     if resume:
+        if resume.get('pathologies') != labels:
+            raise ValueError('Resume labels differ from the configured labels')
+        previous_signature = resume.get('training_state', {}).get('resume_signature')
+        if previous_signature != signature:
+            raise ValueError('Resume dataset/configuration changed or checkpoint is from an older pipeline. Use the matching overnight package.')
         model.load_state_dict(resume["state_dict"], strict=True)
         print(f"Loaded resume checkpoint: {args.resume}")
 
@@ -362,6 +393,10 @@ def main():
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     best_path = checkpoint_dir / "best.pt"
     last_path = checkpoint_dir / "last.pt"
+    if resume and not (args.resume.parent / 'best.pt').exists() and resume.get('training_state', {}).get('best_selection_score', -1) >= 0:
+        raise ValueError('Resume requires best.pt alongside last.pt; attach the complete previous output')
+    if not resume and (best_path.exists() or last_path.exists()):
+        raise ValueError('Checkpoint directory is not empty; explicitly resume or use a new output directory')
     if resume and args.resume.parent.joinpath("best.pt").exists() and not best_path.exists():
         import shutil
         shutil.copy2(args.resume.parent / "best.pt", best_path)
@@ -377,17 +412,26 @@ def main():
     next_epoch = int(saved_state.get("next_epoch", resume.get("extra", {}).get("epoch", -1) + 1 if resume else 0))
     best_macro_auc = float(saved_state.get("best_macro_auc", resume.get("metrics", {}).get("macro_auc", 0.0) if resume else 0.0))
     selection_metric = cfg["train"].get("selection_metric", "macro_auc")
-    if selection_metric not in {"macro_auc", "macro_average_precision"}:
-        raise ValueError("train.selection_metric must be macro_auc or macro_average_precision")
+    if selection_metric not in {
+        "macro_auc", "macro_average_precision", "primary_average_precision",
+        "minimum_class_auc",
+    }:
+        raise ValueError("Unsupported train.selection_metric")
+    primary_labels = cfg.get('decision_strategy', {}).get('primary_labels', [])
+    if selection_metric == 'primary_average_precision' and (not primary_labels or not set(primary_labels).issubset(labels)):
+        raise ValueError('primary_average_precision requires primary_labels included in target_labels')
     resume_metrics = resume.get("metrics", {}) if resume else {}
     default_selection = (
         resume_metrics.get("macro_average_precision", 0.0)
         if selection_metric == "macro_average_precision"
         else resume_metrics.get("macro_auc", 0.0)
     )
-    best_selection_score = float(saved_state.get("best_selection_score", default_selection))
+    if selection_metric == 'primary_average_precision':
+        default_selection = resume_metrics.get('selection_score', 0.0) if resume_metrics.get('selection_metric') == selection_metric else 0.0
+    best_selection_score = float(saved_state.get("best_selection_score", default_selection if resume else -1.0))
     patience_counter = int(saved_state.get("patience_counter", 0))
     best_thresholds = resume.get("thresholds") if resume else None
+    best_decision_policy = resume.get("decision_policy") if resume else None
     _restore_rng_state(saved_state.get("rng_state"))
 
     head_epochs = int(cfg["train"]["epochs_head"])
@@ -397,8 +441,13 @@ def main():
     if next_epoch >= total_epochs:
         print("All configured epochs were already completed; rebuilding final checkpoint only.")
 
+    stop_reason = 'completed'
+    if resume_phase == 'finetune' and patience_counter >= cfg['train']['early_stopping_patience']:
+        stop_reason = 'early_stopped'
+    epoch_durations = []
+
     def run_phase(phase: str, start: int, stop: int, learning_rate: float, patience: int):
-        nonlocal best_macro_auc, best_selection_score, best_thresholds, patience_counter, next_epoch
+        nonlocal best_macro_auc, best_selection_score, best_thresholds, best_decision_policy, patience_counter, next_epoch, stop_reason
         if start >= stop:
             return
         if phase == "head":
@@ -424,19 +473,41 @@ def main():
                 scaler.load_state_dict(saved_state["scaler_state"])
             print(f"Restored optimizer, scheduler and AMP state for {phase} at epoch {start}")
 
+        if not last_path.exists():
+            save_checkpoint(last_path, model, labels, cfg['labels_es'], extra={'config': cfg},
+                            training_state={'phase': phase, 'next_epoch': start,
+                                            'best_selection_score': best_selection_score,
+                                            'rng_state': _capture_rng_state(), 'resume_signature': signature})
+
         for epoch in range(start, stop):
+            if deadline and epoch_durations and time.monotonic() + max(epoch_durations) * 1.2 >= deadline:
+                stop_reason = 'paused_time_budget'
+                return
             started = time.time()
-            train_loss = train_one_epoch(
-                model, train_loader, optimizer, criterion, device, use_amp, scaler,
-                cfg["train"]["grad_clip"], epoch, writer,
-            )
-            val_loss, val_aucs, val_macro_auc, val_targets, val_probs = validate(
-                model, val_loader, device, use_amp, criterion
-            )
+            try:
+                train_loss = train_one_epoch(
+                    model, train_loader, optimizer, criterion, device, use_amp, scaler,
+                    cfg["train"]["grad_clip"], epoch, writer, deadline=deadline,
+                )
+                val_loss, val_aucs, val_macro_auc, val_targets, val_probs = validate(
+                    model, val_loader, device, use_amp, criterion, deadline=deadline,
+                )
+            except BudgetExpired:
+                stop_reason = 'paused_time_budget'
+                print('Time budget reached. The unfinished epoch will repeat from last.pt.', flush=True)
+                return
             val_aps, val_macro_ap = compute_average_precision_scores(val_targets, val_probs)
             selection_score = (
                 val_macro_ap if selection_metric == "macro_average_precision" else val_macro_auc
             )
+            if selection_metric == 'primary_average_precision':
+                primary_aps = [val_aps[labels.index(label)] for label in primary_labels]
+                selection_score = float(np.mean(primary_aps)) if np.isfinite(primary_aps).all() else 0.0
+            elif selection_metric == 'minimum_class_auc':
+                # A macro average can hide one weak category.  Selecting by the
+                # worst class makes a checkpoint improve the floor shared by
+                # every configured output instead of optimizing Effusion only.
+                selection_score = float(np.min(val_aucs)) if np.isfinite(val_aucs).all() else 0.0
             current_lr = optimizer.param_groups[0]["lr"]
             writer.add_scalar("train/epoch_loss", train_loss, epoch)
             writer.add_scalar("val/epoch_loss", val_loss, epoch)
@@ -461,11 +532,29 @@ def main():
                     min_threshold=threshold_cfg.get("min_threshold", 0.05),
                     max_threshold=threshold_cfg.get("max_threshold", 0.95),
                     target_precision=threshold_cfg.get("target_precision", 0.85),
+                    min_sensitivity=threshold_cfg.get("min_sensitivity", 0.0),
+                    target_sensitivity=threshold_cfg.get("target_sensitivity", 0.80),
+                    min_specificity=threshold_cfg.get("min_specificity", 0.0),
+                    min_predictions=threshold_cfg.get("min_predictions", 1),
+                    min_positive_support=threshold_cfg.get("min_positive_support", 1),
                 )
                 threshold_results = optimizer_threshold.get_detailed_results(
                     val_targets, val_probs, labels
                 )
                 best_thresholds = [threshold_results[label].threshold for label in labels]
+                best_decision_policy = {
+                    label: {
+                        "enabled": threshold_results[label].enabled,
+                        "status": threshold_results[label].status,
+                        "threshold": threshold_results[label].threshold,
+                        "validation_precision": threshold_results[label].validation_precision,
+                        "validation_sensitivity": threshold_results[label].validation_sensitivity,
+                        "validation_positive_support": threshold_results[label].n_positive,
+                        "validation_predicted_positive": threshold_results[label].predicted_positive,
+                        "selection_method": threshold_results[label].selection_method,
+                    }
+                    for label in labels
+                }
                 save_thresholds_csv(threshold_results, run_dir / "thresholds_validation.csv")
                 save_checkpoint(
                     best_path, model, labels, cfg["labels_es"],
@@ -480,6 +569,7 @@ def main():
                     },
                     extra={"epoch": epoch, "phase": phase, "config": cfg},
                     thresholds=best_thresholds,
+                    decision_policy=best_decision_policy,
                     pos_weight=pos_weight.detach().cpu().tolist() if pos_weight is not None else None,
                 )
             else:
@@ -496,6 +586,7 @@ def main():
                 "scheduler_state": scheduler.state_dict(),
                 "scaler_state": scaler.state_dict(),
                 "rng_state": _capture_rng_state(),
+                "resume_signature": signature,
             }
             save_checkpoint(
                 last_path, model, labels, cfg["labels_es"],
@@ -510,6 +601,7 @@ def main():
                 },
                 extra={"epoch": epoch, "phase": phase, "config": cfg},
                 thresholds=best_thresholds,
+                decision_policy=best_decision_policy,
                 pos_weight=pos_weight.detach().cpu().tolist() if pos_weight is not None else None,
                 training_state=training_state,
             )
@@ -533,8 +625,12 @@ def main():
                 f"macro_AP={val_macro_ap:.4f} time={time.time() - started:.1f}s "
                 f"best_{selection_metric}={best_selection_score:.4f}"
             )
+            epoch_durations.append(time.time() - started)
+            print(f'Estimated remaining training: {(total_epochs - next_epoch) * np.mean(epoch_durations) / 3600:.2f} hours (approximate)', flush=True)
             if patience_counter >= patience:
                 print(f"Early stopping in {phase} after epoch {epoch}")
+                if phase == 'finetune':
+                    stop_reason = 'early_stopped'
                 break
 
     if resume_phase == "head":
@@ -542,21 +638,33 @@ def main():
             "head", min(next_epoch, head_epochs), head_epochs,
             cfg["train"]["lr_head"], cfg["train"]["early_stopping_patience"],
         )
-        if best_path.exists():
+        if stop_reason != 'paused_time_budget' and best_path.exists():
             model.load_state_dict(load_checkpoint(best_path)["state_dict"], strict=True)
-        patience_counter = 0
-        next_epoch = max(next_epoch, head_epochs)
+        if stop_reason != 'paused_time_budget':
+            patience_counter = 0
+            next_epoch = max(next_epoch, head_epochs)
 
-    run_phase(
-        "finetune", max(next_epoch, head_epochs), total_epochs,
-        cfg["train"]["lr_finetune"], cfg["train"]["early_stopping_patience"],
-    )
+    if stop_reason == 'completed':
+        run_phase(
+            "finetune", max(next_epoch, head_epochs), total_epochs,
+            cfg["train"]["lr_finetune"], cfg["train"]["early_stopping_patience"],
+        )
+
+    status = {'status': stop_reason, 'next_epoch': next_epoch, 'total_epochs': total_epochs,
+              'training_finished': stop_reason in ('completed', 'early_stopped'),
+              'best_checkpoint_available': best_path.exists(), 'test_evaluated': False}
+    (checkpoint_dir / 'session_status.json').write_text(json.dumps(status, indent=2), encoding='utf-8')
+    if stop_reason == 'paused_time_budget':
+        writer.close()
+        print(json.dumps(status), flush=True)
+        return
 
     if best_path.exists():
         best_checkpoint = load_checkpoint(best_path)
         model.load_state_dict(best_checkpoint["state_dict"], strict=True)
         best_metrics = best_checkpoint.get("metrics", {})
         best_thresholds = best_checkpoint.get("thresholds", best_thresholds)
+        best_decision_policy = best_checkpoint.get("decision_policy", best_decision_policy)
     else:
         best_metrics = {
             "macro_auc": best_macro_auc,
@@ -569,6 +677,7 @@ def main():
         final_path, model, labels, cfg["labels_es"], metrics=best_metrics,
         extra={"config": cfg, "total_epochs": min(next_epoch, total_epochs), "experiment": cfg.get("experiment", {})},
         thresholds=_threshold_list(best_thresholds, labels),
+        decision_policy=best_decision_policy,
         pos_weight=pos_weight.detach().cpu().tolist() if pos_weight is not None else None,
     )
     writer.close()

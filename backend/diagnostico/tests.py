@@ -53,8 +53,10 @@ class TestDetectorTorax:
         assert modelo1 is mock_model
 
         # Segunda carga debe retornar el mismo (singleton)
+        mock_torch.set_num_threads.reset_mock()
         modelo2 = DetectorTorax.cargar()
         assert modelo2 is mock_model
+        mock_torch.set_num_threads.assert_called_once()
         assert mock_xrv.models.DenseNet.call_count == 1
         DetectorTorax._modelo = None
         DetectorTorax._ready = False
@@ -66,18 +68,20 @@ class TestDetectorTorax:
         import numpy as np
 
         mock_model = MagicMock()
-        mock_model.pathologies = ["Pneumonia", "Effusion", "Atelectasis"]
+        mock_model.pathologies = ["Pneumothorax", "Effusion", "Edema"]
         mock_model.return_value = torch.tensor([[0.8, 0.1, 0.05]])
         DetectorTorax._transform = lambda value: value
-        DetectorTorax._labels_es = {"Pneumonia": "Neumonía", "Effusion": "Derrame pleural", "Atelectasis": "Atelectasia"}
+        DetectorTorax._labels_es = {"Pneumothorax": "Neumotórax", "Effusion": "Derrame pleural", "Edema": "Edema pulmonar"}
+        DetectorTorax._thresholds = {label: 0.5 for label in mock_model.pathologies}
+        DetectorTorax._decision_policy = {label: {"enabled": True, "status": "enabled"} for label in mock_model.pathologies}
         mock_cargar.return_value = mock_model
 
         img = np.random.rand(512, 512).astype(np.float32)
         resultado = DetectorTorax.predecir(img, 255.0)
 
-        assert resultado["probabilidades"]["Pneumonia"] == pytest.approx(0.8)
+        assert resultado["probabilidades"]["Pneumothorax"] == pytest.approx(0.8)
         assert resultado["probabilidades"]["Effusion"] == pytest.approx(0.1)
-        assert resultado["hallazgos"][0]["etiqueta"] == "Neumonía"
+        assert resultado["hallazgos"][0]["etiqueta"] == "Neumotórax"
 
 
     @patch("diagnostico.services.DetectorTorax.cargar")
@@ -85,24 +89,27 @@ class TestDetectorTorax:
         from diagnostico.services import DetectorTorax
 
         mock_model = MagicMock()
-        mock_model.pathologies = ["Pneumonia", "Effusion"]
-        mock_model.return_value = torch.tensor([[0.0, 2.0]])
+        mock_model.pathologies = ["Pneumothorax", "Effusion", "Edema"]
+        mock_model.return_value = torch.tensor([[0.0, 2.0, -2.0]])
         mock_cargar.return_value = mock_model
 
         previous = (
             DetectorTorax._transform,
             DetectorTorax._labels_es,
             DetectorTorax._thresholds,
+            DetectorTorax._decision_policy,
             DetectorTorax._is_finetuned,
             DetectorTorax._model_name,
         )
         try:
             DetectorTorax._transform = lambda value: value
             DetectorTorax._labels_es = {
-                "Pneumonia": "Neumonia",
+                "Pneumothorax": "Neumotórax",
                 "Effusion": "Derrame pleural",
+                "Edema": "Edema pulmonar",
             }
-            DetectorTorax._thresholds = {"Pneumonia": 0.6, "Effusion": 0.8}
+            DetectorTorax._thresholds = {"Pneumothorax": 0.6, "Effusion": 0.8, "Edema": 0.8}
+            DetectorTorax._decision_policy = {label: {"enabled": True, "status": "enabled"} for label in mock_model.pathologies}
             DetectorTorax._is_finetuned = True
             DetectorTorax._model_name = "resnet50_finetuned_nih"
 
@@ -110,21 +117,83 @@ class TestDetectorTorax:
                 np.zeros((32, 32), dtype=np.float32), 255.0
             )
 
-            assert result["probabilidades"]["Pneumonia"] == pytest.approx(0.5)
+            assert result["probabilidades"]["Pneumothorax"] == pytest.approx(0.5)
             assert result["probabilidades"]["Effusion"] == pytest.approx(
                 torch.sigmoid(torch.tensor(2.0)).item()
             )
             assert result["hallazgos"][0]["detectado"] is True
             assert result["hallazgos"][1]["detectado"] is False
             assert result["es_fine_tuned"] is True
+            assert result["decision"]["estado"] == "categoria_detectada"
+            assert result["categoria"]["clave"] == "pleural"
         finally:
             (
                 DetectorTorax._transform,
                 DetectorTorax._labels_es,
                 DetectorTorax._thresholds,
+                DetectorTorax._decision_policy,
                 DetectorTorax._is_finetuned,
                 DetectorTorax._model_name,
             ) = previous
+
+    @patch("diagnostico.services.DetectorTorax.cargar")
+    def test_checkpoint_sin_politica_se_abstiene(self, mock_cargar):
+        from diagnostico.services import DetectorTorax
+
+        mock_model = MagicMock()
+        mock_model.pathologies = ["Pneumothorax", "Effusion", "Edema"]
+        mock_model.return_value = torch.tensor([[0.95, 0.92, 0.90]])
+        mock_cargar.return_value = mock_model
+        DetectorTorax._transform = lambda value: value
+        DetectorTorax._labels_es = {
+            "Pneumothorax": "Neumotórax", "Effusion": "Derrame pleural", "Edema": "Edema pulmonar"
+        }
+        DetectorTorax._thresholds = {label: 0.5 for label in mock_model.pathologies}
+        DetectorTorax._decision_policy = {}
+        DetectorTorax._is_finetuned = False
+
+        result = DetectorTorax.predecir(np.zeros((32, 32), dtype=np.float32), 255.0)
+
+        assert not any(item["detectado"] for item in result["hallazgos"])
+        assert result["decision"]["estado"] == "modelo_pendiente_validacion"
+
+
+def _category_finding(label, category, score, threshold=0.5, detected=True):
+    return {
+        "etiqueta": label,
+        "etiqueta_en": label,
+        "categoria": category,
+        "probabilidad_estimada": score,
+        "threshold_usado": threshold,
+        "detectado": detected,
+        "evidencia_categoria": max(0.0, (score - threshold) / threshold) if detected else 0.0,
+    }
+
+
+def test_category_selector_returns_one_clear_category():
+    from diagnostico.categories import select_primary_category
+
+    result = select_primary_category([
+        _category_finding("Derrame pleural", "pleural", 0.90),
+        _category_finding("Neumonía", "infecciosa", 0.56),
+        _category_finding("Fibrosis", "intersticial", 0.40, detected=False),
+    ])
+
+    assert result["estado"] == "seleccionada"
+    assert result["clave"] == "pleural"
+    assert [item["etiqueta"] for item in result["enfermedades"]] == ["Derrame pleural"]
+
+
+def test_category_selector_abstains_on_close_categories():
+    from diagnostico.categories import select_primary_category
+
+    result = select_primary_category([
+        _category_finding("Masa", "tumoral", 0.80),
+        _category_finding("Neumonía", "infecciosa", 0.78),
+    ])
+
+    assert result["estado"] == "ambigua"
+    assert result["clave"] is None
 
 
 class TestDiagnosticoAPI:
@@ -223,6 +292,25 @@ class TestDiagnosticoAPI:
         assert "niveles_visuales_generales" in data
         assert "alto" in data["niveles_visuales_generales"]
         assert "umbrales_visuales_por_patologia" in data
+
+    def test_clasificar_probabilidades_valida_y_responde_desde_backend(self, auth_client):
+        response = auth_client.post(
+            reverse("clasificar-probabilidades"),
+            {"patologias": {"Enfisema": 0.72, "Neumotórax": 0.12}},
+            format="json",
+        )
+        assert response.status_code == status.HTTP_200_OK
+        assert response.json()["Enfisema"]["etiqueta"] == "Alto"
+        assert response.json()["Neumotórax"]["etiqueta"] == "No significativo"
+
+    def test_clasificar_probabilidades_rechaza_valores_fuera_de_rango(self, auth_client):
+        response = auth_client.post(
+            reverse("clasificar-probabilidades"),
+            {"patologias": {"Enfisema": 1.4}},
+            format="json",
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "entre 0 y 1" in response.json()["error"]
 
 
 class TestNivelesClinicos:

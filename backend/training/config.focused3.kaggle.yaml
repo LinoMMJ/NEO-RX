@@ -1,0 +1,69 @@
+# Neo RX focused3: three radiographic findings selected for the first
+# precision-oriented release. This is MULTI-LABEL because findings can coexist.
+
+data:
+  data_dir: "/kaggle/input/nih-chest-xrays"
+  splits_json: "/kaggle/working/manifests-focused3/splits.json"
+  manifest: "/kaggle/working/manifests-focused3/clean_manifest.csv"
+  processed_dir: "/kaggle/working/processed-focused3"
+
+model:
+  base_weights: "resnet50-res512-all"
+  num_classes: 3
+  checkpoint_dir: "/kaggle/working/checkpoints-focused3"
+  checkpoint_name: "neorx_focused3_resnet50.pt"
+
+train:
+  epochs_head: 3
+  epochs_finetune: 18
+  lr_head: 1.0e-3
+  lr_finetune: 1.0e-4
+  weight_decay: 1.0e-4
+  batch_size: 16
+  num_workers: 4
+  mixed_precision: true
+  early_stopping_patience: 6
+  grad_clip: 1.0
+  seed: 42
+  log_dir: "/kaggle/working/runs-focused3"
+  use_pos_weight: true
+  selection_metric: "macro_average_precision"
+
+augmentation:
+  enabled: true
+  rotation_degrees: 5
+  scale_range: 0.10
+  brightness: 0.15
+  contrast: 0.15
+  gaussian_noise_std: 0.01
+  horizontal_flip: false
+
+# A class is disabled when validation cannot meet ALL these conditions.
+# This prevents a 0.95 threshold with zero sensitivity from appearing valid.
+threshold:
+  method: "precision_recall_guarded"
+  target_precision: 0.90
+  min_sensitivity: 0.60
+  min_predictions: 30
+  min_positive_support: 100
+  min_threshold: 0.05
+  max_threshold: 0.99
+
+safety:
+  # Final checkpoints must use every image assigned to train/validation.
+  require_full_dataset: true
+
+experiment:
+  name: "neorx_focused3_v1"
+  description: "Three-finding multi-label model with guarded abstention"
+  tags: ["focused3", "multi-label", "abstention", "resnet50", "nih-chestxray14"]
+
+target_labels:
+  - "Pneumothorax"
+  - "Effusion"
+  - "Edema"
+
+labels_es:
+  Pneumothorax: "Neumotórax"
+  Effusion: "Derrame pleural"
+  Edema: "Edema pulmonar"

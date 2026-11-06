@@ -1,6 +1,7 @@
 import time
 import logging
 from celery import shared_task
+from django.db import transaction
 
 from estudios.models import ImagenDICOM
 from .models import ResultadoCNN
@@ -38,18 +39,23 @@ def procesar_imagen_cnn(self, imagen_id):
         es_dicom = ruta.lower().endswith(('.dcm', '.dicom'))
 
         t0 = time.time()
-        resultado = DetectorTorax.desde_dicom(ruta) if es_dicom else DetectorTorax.desde_png(ruta)
+        ruta_procesable = imagen.archivo_png.path if imagen.archivo_png else ruta
+        resultado = DetectorTorax.desde_dicom(ruta) if es_dicom else DetectorTorax.desde_png(ruta_procesable)
         tiempo = round(time.time() - t0, 3)
 
-        res_cnn, _ = ResultadoCNN.objects.update_or_create(
-            imagen=imagen,
-            defaults={'patologias': resultado, 'tiempo_inferencia_seg': tiempo},
-        )
-        imagen.estado_procesamiento = 'procesado'
-        imagen.save(update_fields=["estado_procesamiento"])
-
         from informes.services import create_ai_draft_report
-        informe, _ = create_ai_draft_report(imagen.estudio, imagen, res_cnn)
+        # Polling must never see SUCCESS before the report and result exist.
+        # A report failure rolls back the entire result, not the uploaded file.
+        with transaction.atomic():
+            res_cnn, _ = ResultadoCNN.objects.update_or_create(
+                imagen=imagen,
+                defaults={'patologias': resultado, 'tiempo_inferencia_seg': tiempo},
+            )
+            informe, _ = create_ai_draft_report(imagen.estudio, imagen, res_cnn)
+            imagen.estudio.estado = "completado"
+            imagen.estudio.save(update_fields=["estado"])
+            imagen.estado_procesamiento = 'procesado'
+            imagen.save(update_fields=["estado_procesamiento"])
 
         log_audit(None, action="process", resource_type="resultado_cnn", resource_id=str(res_cnn.pk),
                   metadata={"imagen_id": imagen_id, "estado": "procesado"})
@@ -61,10 +67,15 @@ def procesar_imagen_cnn(self, imagen_id):
             'informe_id': informe.id,
             'informe_estado': informe.estado,
             'patologias': probabilities_es(resultado),
+            'hallazgos': resultado.get('hallazgos', []),
             'tiempo_inferencia_seg': tiempo,
             'modelo': resultado.get('modelo', 'cnn'),
             'es_fine_tuned': bool(resultado.get('es_fine_tuned', False)),
             'resolucion_entrada': DetectorTorax._input_size,
+            'decision': resultado.get('decision', {}),
+            'categoria': resultado.get('categoria', {}),
+            'enfoque': resultado.get('enfoque'),
+            'alcance_modelo': resultado.get('alcance', []),
         }
 
     except Exception as e:
@@ -72,7 +83,9 @@ def procesar_imagen_cnn(self, imagen_id):
         if imagen is not None:
             try:
                 imagen.estado_procesamiento = 'error'
-                imagen.save()
+                imagen.save(update_fields=["estado_procesamiento"])
+                imagen.estudio.estado = "pendiente"
+                imagen.estudio.save(update_fields=["estado"])
             except Exception:
                 pass
         raise

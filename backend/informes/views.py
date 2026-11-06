@@ -12,12 +12,10 @@ Endpoints:
 """
 
 from datetime import datetime
-from io import BytesIO
 
 from django_ratelimit.decorators import ratelimit
 from django.utils.decorators import method_decorator
 from django.http import FileResponse
-from django.template.loader import render_to_string
 from rest_framework.views import APIView
 from rest_framework.generics import RetrieveUpdateAPIView, ListAPIView
 from rest_framework.permissions import IsAuthenticated
@@ -44,42 +42,48 @@ from neorx.permissions import MedicalWritePermission
 # (sin acentos): "Neumonia", "Consolidacion", "Nodulo", "Neumotorax", etc.
 # Usar acentos aquí provocaría .get() == 0 y el informe saldría siempre vacío.
 
-def _pct(v):
-    return "≥99.9/100" if v >= 0.999 else f"{v * 100:.1f}/100"
-
-
 def generar_texto_hallazgos(resultado_cnn, tipo_proyeccion):
     from diagnostico.results import threshold_findings
     findings = threshold_findings(resultado_cnn.patologias)
     candidates = [item for item in findings if item['detectado']]
     lines = [
-        "Plantilla de lectura radiográfica de tórax — borrador asistido por IA.",
-        f"Proyección: {tipo_proyeccion}.",
+        "Plantilla de lectura radiográfica de tórax. Complete cada región tras revisar la imagen.",
         "",
-        "PARÉNQUIMA PULMONAR",
-        "• Opacidades o infiltrados: [describir presencia, patrón y localización].",
+        "Pulmones y vía aérea",
+        "• Opacidades o infiltrados: [describir presencia, patrón, lateralidad y localización].",
         "• Broncograma aéreo: [valorar si está presente o ausente].",
         "",
-        "PLEURAS Y SILUETA CARDIOMEDIASTÍNICA",
-        "• Derrame pleural / neumotórax: [describir si corresponde].",
-        "• Tamaño cardiaco y mediastino: [describir hallazgos].",
+        "Pleuras",
+        "• Derrame pleural o neumotórax: [describir presencia, lado y extensión].",
         "",
-        "APOYO DE IA — NO CONFIRMA HALLAZGOS",
+        "Silueta cardiomediastínica y estructuras óseas",
+        "• Tamaño cardiaco y mediastino: [describir hallazgos].",
+        "• Estructuras óseas visibles: [describir hallazgos relevantes].",
+        "",
+        "Señales del modelo que requieren comprobación visual",
     ]
     lines.extend(
-        f"• {item['etiqueta']}: señal {_pct(item['probabilidad_estimada'])}; umbral {_pct(item['threshold_usado'])}. Pendiente de confirmar en imagen."
+        f"• Señal compatible con {item['etiqueta'].lower()}; alcanzó el criterio validado y está pendiente de confirmar en imagen."
         for item in candidates
     )
-    if not findings:
-        lines.append("• Sin umbrales registrados; consultar la salida técnica del análisis.")
+    category = resultado_cnn.patologias.get("categoria", {})
+    if category.get("estado") == "seleccionada":
+        lines.append(f"• Categoría principal: {category.get('nombre', category.get('clave'))}. No excluye hallazgos coexistentes.")
+    elif category and not (resultado_cnn.patologias.get('enfoque') or {}).get('hallazgos_detectados'):
+        lines.append(f"• Resultado no concluyente: {category.get('mensaje', 'no se alcanzaron criterios para seleccionar una categoría.')}")
+    elif not findings:
+        lines.append("• El análisis no conserva umbrales; consulte la salida técnica.")
     elif not candidates:
         lines.append("• Ninguna señal supera su umbral. No permite descartar enfermedad.")
     elif len(candidates) > 1:
         lines.append("• Múltiples señales: pueden coexistir hallazgos o falsos positivos; no se puede seleccionar un diagnóstico único automáticamente.")
-    lines.append("Las puntuaciones no son porcentajes de certeza. El detalle completo se conserva en el análisis.")
+    decision = resultado_cnn.patologias.get("decision", {})
+    if decision.get("mensaje"):
+        lines.append(f"• Decisión del sistema: {decision['mensaje']}")
+    lines.append("Las puntuaciones técnicas se conservan para auditoría, no como porcentajes de certeza diagnóstica.")
     lines.extend([
         "",
-        "La localización, lateralidad y los signos radiológicos deben ser confirmados y completados por el médico radiólogo.",
+        f"Proyección registrada: {tipo_proyeccion}. La localización, lateralidad y los signos deben ser confirmados por el médico radiólogo.",
     ])
     return "\n".join(lines)
 
@@ -94,18 +98,27 @@ def generar_correlacion_clinica():
 
 
 def generar_impresion(resultado_cnn):
+    from diagnostico.results import threshold_findings
+    candidates = [item["etiqueta"] for item in threshold_findings(resultado_cnn.patologias) if item["detectado"]]
+    decision = resultado_cnn.patologias.get("decision", {})
+    category = resultado_cnn.patologias.get("categoria", {})
+    signals = ", ".join(candidates) if candidates else "resultado no concluyente dentro del alcance del modelo"
+    if category.get("estado") == "seleccionada":
+        if not candidates and resultado_cnn.patologias.get('enfoque'):
+            signals = 'orientación sin identificación de una enfermedad específica'
+        signals = f"categoría principal {category.get('nombre', category.get('clave'))}; {signals}"
     return (
-        "1. Impresión preliminar pendiente de revisión por médico radiólogo.\n"
-        "2. Correlacionar los hallazgos radiográficos con el cuadro clínico y estudios complementarios.\n"
-        "3. La salida de IA no confirma ni descarta una patología por sí sola."
+        "Conclusión radiológica preliminar pendiente de confirmación por el médico radiólogo.\n\n"
+        f"Apoyo de IA por revisar: {signals}.\n"
+        f"{decision.get('mensaje', '')}\n"
+        "La salida del modelo no confirma ni descarta patologías por sí sola."
     )
 
 
 def generar_recomendaciones(resultado_cnn):
     return (
-        "Conducta según criterio del médico tratante y radiólogo. Considerar hemograma u otros estudios "
-        "si el cuadro clínico es compatible con infección. Valorar tomografía de tórax ante dudas diagnósticas, "
-        "discordancia clínico-radiológica o sospecha de complicaciones."
+        "Definir seguimiento o estudios complementarios según los hallazgos confirmados y el contexto clínico.\n"
+        "Comunicar hallazgos urgentes al equipo tratante cuando corresponda."
     )
 
 
@@ -276,7 +289,8 @@ class DescargarInformePDFView(APIView):
     """
     GET /api/informes/<pk>/pdf/ — genera y descarga el informe como PDF (ReportLab).
 
-    Solo disponible para informes en estado 'firmado'.
+    El parámetro borrador=1 permite al médico o administrador descargar
+    un preinforme identificado como no firmado, sin cambiar su estado.
     RF-24: ReportLab como motor principal.
     """
     permission_classes = [IsAuthenticated]
@@ -284,12 +298,16 @@ class DescargarInformePDFView(APIView):
     def get(self, request, pk):
         try:
             informe = InformePreliminar.objects.select_related(
-                "estudio__paciente", "medico"
+                "estudio__paciente", "medico", "imagen_origen"
             ).get(pk=pk)
         except InformePreliminar.DoesNotExist:
             return Response({"error": "Informe no encontrado."}, status=status.HTTP_404_NOT_FOUND)
 
-        if informe.estado != "firmado" or not informe.medico_id or not informe.fecha_firmado:
+        es_borrador = informe.estado != "firmado"
+        if es_borrador and request.query_params.get("borrador") == "1":
+            if request.user.rol not in {"medico", "administrador"}:
+                return Response({"error": "Solo el médico o administrador puede exportar un preinforme."}, status=403)
+        elif es_borrador or not informe.medico_id or not informe.fecha_firmado:
             return Response(
                 {"error": "Solo se pueden descargar informes firmados."},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -316,36 +334,21 @@ class DescargarInformePDFView(APIView):
             "fecha_firmado": fecha_firmado,
         }
 
-        # Motor principal: ReportLab (RF-24). Fallback: xhtml2pdf (no requiere libs nativas).
+        # Un solo motor conserva imagen, estado y firma en todas las exportaciones.
         try:
             from .pdf_generator import generar_pdf_informe
             pdf_bytes = generar_pdf_informe(informe, contexto=contexto)
         except Exception as exc:
-            # Fallback controlado a xhtml2pdf usando el template HTML existente.
-            try:
-                from xhtml2pdf import pisa
-                html_string = render_to_string("informes/informe_pdf.html", contexto)
-                pdf_bytes = BytesIO()
-                result = pisa.CreatePDF(html_string, dest=pdf_bytes)
-                if result.err:
-                    return Response(
-                        {"error": "Error al generar el PDF."},
-                        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    )
-                pdf_bytes.seek(0)
-            except Exception as exc2:
-                # Error controlado, sin exponer traceback interno.
-                import logging
-                logger = logging.getLogger("neorx.request")
-                logger.error("PDF generation failed: %s | fallback: %s", exc, exc2)
-                return Response(
-                    {"error": "No se pudo generar el PDF. Contacte al administrador."},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                )
+            import logging
+            logging.getLogger("neorx.request").exception("PDF generation failed for report %s", informe.pk)
+            return Response(
+                {"error": "No se pudo generar el PDF. Intente nuevamente o contacte al administrador."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
-        filename = f"Informe_{paciente.ci}_{informe.estudio.id}.pdf"
-        response = FileResponse(pdf_bytes, content_type="application/pdf")
-        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        filename = f"{'Preinforme' if es_borrador else 'Informe'}_Estudio{informe.estudio_id}.pdf"
+        response = FileResponse(pdf_bytes, content_type="application/pdf", as_attachment=True, filename=filename)
+        response["Cache-Control"] = "private, no-store"
 
         # Auditoría: descarga de PDF
         log_audit(
@@ -529,7 +532,7 @@ class DescargarInformeDICOMSRView(APIView):
         ai_meta = self._make_container(
             "113001", "DCM", "AI Assistant Metadata",
             children=[
-                self._text_item("113002", "DCM", "AI System", "Neo RX CNN ResNet-50 (torchxrayvision)"),
+                self._text_item("113002", "DCM", "AI System", "Neo RX CNN DenseNet-121 (torchxrayvision)"),
                 self._text_item("113003", "DCM", "AI Version", "1.0"),
                 self._text_item("113004", "DCM", "AI Role", "Decision Support (no autonomous diagnosis)"),
                 self._text_item("113005", "DCM", "Disclaimer", "Este informe es preliminar. Requiere validación y firma del médico radiólogo por el profesional responsable."),

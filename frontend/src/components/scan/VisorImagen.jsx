@@ -44,7 +44,7 @@ const VISTAS = [
 
 export default function VisorImagen({
   imagenUrl, gradCAM, gradCAMCargando, gradCAMError, esNitida, varianza,
-  patologias, patologiaSeleccionada, onPatologiaChange,
+  patologias, objetivosGradcam, patologiaSeleccionada, onPatologiaChange,
   analysisEnabled = true, altText = 'Radiografía de tórax',
 }) {
   const [vista, setVista] = useState('original')
@@ -68,13 +68,13 @@ export default function VisorImagen({
   // Solo muestra placeholder si realmente no hay ninguna URL de imagen
   const mostrarPlaceholder = !privateSrc || failedSource === privateSrc
 
-  // Patologías con prob > 40% para mostrar como pills
-  const patologiasSignificativas = patologias
-    ? Object.entries(patologias).filter(([, p]) => p > 0.4)
-    : []
-  const patologiaPredeterminada = patologias
-    ? Object.entries(patologias).sort((a, b) => b[1] - a[1]).map(([nombre]) => PATOLOGIAS_EN[nombre]).find(Boolean)
-    : null
+  // El flujo nuevo recibe los objetivos aprobados por backend, incluso una lista vacía.
+  // Los históricos permiten explorar activaciones sin aplicar otro umbral clínico.
+  const objetivos = objetivosGradcam ?? Object.entries(patologias || {})
+    .filter(([nombre, score]) => PATOLOGIAS_EN[nombre] && Number.isFinite(score))
+    .sort((a, b) => b[1] - a[1])
+    .map(([nombre]) => ({ etiqueta: nombre, etiqueta_en: PATOLOGIAS_EN[nombre] }))
+  const patologiaPredeterminada = objetivos[0]?.etiqueta_en
 
   const solicitarMapa = () => {
     if (!patologiaPredeterminada || gradCAMCargando) return
@@ -177,7 +177,7 @@ export default function VisorImagen({
           onClick={solicitarMapa}
           className="mt-3 rounded-lg border border-teal-med/35 bg-teal-med/10 px-3 py-2 text-xs font-semibold text-teal-med transition-colors hover:bg-teal-med/20"
         >
-          Generar mapa de calor de la patología principal
+          Generar mapa de calor del resultado principal
         </button>
       )}
 
@@ -193,21 +193,20 @@ export default function VisorImagen({
             <span className="font-body text-white/60 text-xs">Alta activación</span>
           </div>
           <div className="h-3 rounded-full" style={{
-            background: 'linear-gradient(to right, #000080, #0000ff, #00ffff, #00ff00, #ffff00, #ff8000, #ff0000)'
+            background: 'linear-gradient(to right, #000004, #3b0f70, #8c2981, #de4968, #fe9f6d, #fcfdbf)'
           }} />
           <p className="font-body text-white/40 text-[10px] mt-2 text-center">
-            Las zonas cálidas muestran qué regiones influyeron en la puntuación. El mapa usa el recorte central de la CNN; no delimita una lesión.
+            Las manchas cálidas muestran regiones que influyeron en la puntuación. El suavizado mejora la lectura visual; no delimita una lesión ni representa su tamaño exacto.
           </p>
         </motion.div>
       )}
 
       {/* Pills de patología para seleccionar Grad-CAM */}
-      {analysisEnabled && patologiasSignificativas.length > 0 && (
+      {analysisEnabled && objetivos.length > 0 && (
         <div className="mt-3">
-          <p className="font-body text-white/50 text-xs mb-2">Ver Grad-CAM por patología:</p>
+          <p className="font-body text-white/50 text-xs mb-2">Ver Grad-CAM del resultado:</p>
           <div className="flex flex-wrap gap-1.5">
-            {patologiasSignificativas.map(([nombre]) => {
-              const englishKey = PATOLOGIAS_EN[nombre]
+            {objetivos.map(({ etiqueta: nombre, etiqueta_en: englishKey }) => {
               const activa = patologiaSeleccionada === englishKey
               return (
                 <button

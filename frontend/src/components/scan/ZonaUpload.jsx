@@ -35,7 +35,7 @@ export default function ZonaUpload({ onArchivo, archivo, previewUrl, previewLoad
       <input
         ref={inputRef}
         type="file"
-        accept=".dcm,.dicom,.png,.jpg,.jpeg,.webp"
+        accept=".dcm,.dicom,.png,.jpg,.jpeg,.webp,.tif,.tiff,.bmp"
         className="hidden"
         onChange={(e) => e.target.files[0] && onArchivo(e.target.files[0])}
       />
@@ -85,7 +85,7 @@ export default function ZonaUpload({ onArchivo, archivo, previewUrl, previewLoad
             {drag ? 'Suelta el archivo aquí' : (title || 'Arrastra tu archivo o haz clic')}
           </p>
           <p className="font-body text-sm text-slate-400 mt-1 text-center">
-            Formatos aceptados: DICOM · PNG · JPG · WEBP
+            Formatos aceptados: DICOM · PNG · JPG · WEBP · TIFF · BMP
           </p>
           <p className="font-body text-xs text-slate-400 mt-4 text-center max-w-xs">
             {helpText || 'Primero verificamos que sea una radiografía y determinamos la región. Solo las radiografías de tórax pasan al análisis CNN.'}

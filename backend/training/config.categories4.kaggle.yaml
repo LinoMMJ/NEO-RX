@@ -1,0 +1,86 @@
+# Neo RX categories4: disease-level outputs grouped into one primary category.
+# Training remains multi-label because radiographic findings can coexist. The
+# deployed decision layer selects one category only when validation thresholds
+# and the inter-category margin support it; otherwise it abstains.
+
+data:
+  data_dir: "/kaggle/input/nih-chest-xrays"
+  splits_json: "/kaggle/working/manifests-categories4/splits.json"
+  manifest: "/kaggle/working/manifests-categories4/clean_manifest.csv"
+  processed_dir: "/kaggle/working/processed-categories4"
+
+model:
+  base_weights: "resnet50-res512-all"
+  num_classes: 10
+  checkpoint_dir: "/kaggle/working/checkpoints-categories4"
+  checkpoint_name: "neorx_categories4_resnet50.pt"
+
+train:
+  epochs_head: 3
+  epochs_finetune: 18
+  lr_head: 1.0e-3
+  lr_finetune: 1.0e-4
+  weight_decay: 1.0e-4
+  batch_size: 16
+  num_workers: 4
+  mixed_precision: true
+  early_stopping_patience: 6
+  grad_clip: 1.0
+  seed: 42
+  log_dir: "/kaggle/working/runs-categories4"
+  use_pos_weight: true
+  selection_metric: "macro_average_precision"
+
+augmentation:
+  enabled: true
+  rotation_degrees: 5
+  scale_range: 0.10
+  brightness: 0.15
+  contrast: 0.15
+  gaussian_noise_std: 0.01
+  horizontal_flip: false
+
+threshold:
+  method: "precision_recall_guarded"
+  target_precision: 0.90
+  min_sensitivity: 0.60
+  min_predictions: 30
+  min_positive_support: 100
+  min_threshold: 0.05
+  max_threshold: 0.99
+
+safety:
+  require_full_dataset: true
+
+experiment:
+  name: "neorx_categories4_v1"
+  description: "Four-category presentation with disease-level guarded outputs"
+  tags: ["categories4", "multi-label", "abstention", "resnet50", "nih-chestxray14"]
+
+target_labels:
+  # Tumoral
+  - "Mass"
+  - "Nodule"
+  # Pleural
+  - "Effusion"
+  - "Pneumothorax"
+  - "Pleural_Thickening"
+  # Infecciosa (hallazgos radiográficos compatibles, no etiología confirmada)
+  - "Pneumonia"
+  - "Consolidation"
+  # Intersticial
+  - "Fibrosis"
+  - "Edema"
+  - "Infiltration"
+
+labels_es:
+  Mass: "Masa pulmonar"
+  Nodule: "Nódulo pulmonar"
+  Effusion: "Derrame pleural"
+  Pneumothorax: "Neumotórax"
+  Pleural_Thickening: "Engrosamiento pleural"
+  Pneumonia: "Neumonía"
+  Consolidation: "Consolidación"
+  Fibrosis: "Fibrosis pulmonar"
+  Edema: "Edema pulmonar"
+  Infiltration: "Infiltrado pulmonar"

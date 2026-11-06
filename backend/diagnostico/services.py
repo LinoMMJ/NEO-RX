@@ -1,10 +1,11 @@
 """
 Servicio de inferencia CNN para radiografías de tórax - proyecto Neo RX.
 
-Modelo: ResNet-50 de torchxrayvision (resnet50-res512-all) — baseline preentrenado
-o fine-tuned en NIH ChestX-ray14 (12 patologías pulmonares). La salida se filtra a las
-patologías neumológicas relevantes para el área de neumología del centro
-Neo Rayos X Digital.
+Modelo activo por defecto: ResNet-50 de torchxrayvision
+(resnet50-res512-all) — baseline preentrenado
+o checkpoint fine-tuned configurable. Las clases, sus traducciones y los umbrales
+de decisión se leen del propio checkpoint para mantener coherente la inferencia
+con el entrenamiento activo.
 
 El modelo se carga una sola vez en memoria (patrón singleton) y se reutiliza
 en cada inferencia. Si la variable de entorno NEORX_MODEL_PATH apunta a un
@@ -122,6 +123,10 @@ PULMONARY_LABELS = {
     "Pneumothorax",
 }
 
+# El alcance de presentación se organiza en cuatro categorías. Las etiquetas
+# concretas disponibles siempre proceden del checkpoint cargado.
+from .categories import CATEGORY_BY_LABEL, CATEGORY_DEFINITIONS, select_primary_category, supported_category_labels
+
 
 class _ResNet50FineTuned(nn.Module):
     """Local checkpoint architecture without downloading additional weights."""
@@ -146,8 +151,9 @@ class DetectorTorax:
     """Encapsula el modelo CNN y todo el preprocesamiento de la imagen.
 
     Soporta dos modos:
-    - Baseline: torchxrayvision ResNet-50 preentrenado (18 labels)
-    - Fine-tuned: checkpoint propio entrenado en NIH ChestX-ray14 (12 labels pulmonares)
+    - Baseline: modelo preentrenado de torchxrayvision (18 labels). La
+      configuración local recomendada usa ResNet-50 a 512 px.
+    - Fine-tuned: checkpoint propio con las clases declaradas en sus metadatos
       Activado mediante variable de entorno NEORX_MODEL_PATH.
 
     REGLAS CRÍTICAS:
@@ -160,18 +166,29 @@ class DetectorTorax:
     _transform = None
     _labels_es = None       # Mapa EN->ES del modelo cargado
     _thresholds = None      # Thresholds por clase (del checkpoint)
+    _decision_policy = None # Evidencia de validación y habilitación por clase
+    _decision_strategy = None
+    _model_metrics = None   # Métricas de VALIDACIÓN guardadas por el entrenamiento
+    _training_info = None
     _is_finetuned = False   # True si se cargó checkpoint fine-tuned
     _ready = False
     _input_size = 512
     _model_name = ""
     _config_key = None
     _load_lock = threading.Lock()
-    # PyTorch ejecutando varias ResNet-50 a la vez en CPU degrada mucho el
+    # PyTorch ejecutando varias CNN a la vez en CPU degrada mucho el
     # rendimiento: cada solicitud compite por los mismos hilos y termina
     # tardando más que una sola ejecución ordenada.  El servidor de desarrollo
     # puede atender solicitudes concurrentes, por lo que protegemos únicamente
     # la pasada del modelo; el resto del upload continúa siendo concurrente.
     _inference_lock = threading.Lock()
+
+    @classmethod
+    def configured_input_size(cls):
+        if os.environ.get('NEORX_MODEL_PATH'):
+            return cls._finetuned_input_size()
+        name = os.environ.get('NEORX_BASELINE_WEIGHTS', 'resnet50-res512-all')
+        return 512 if 'res512' in name else 224
 
     @staticmethod
     def _finetuned_input_size() -> int:
@@ -194,8 +211,12 @@ class DetectorTorax:
     @classmethod
     def cargar(cls):
         """Carga y precalienta el modelo una sola vez de forma segura."""
+        # OpenMP settings can be thread-local. Django creates request threads
+        # after startup: configure them too, including the singleton fast path.
+        threads = max(1, int(os.environ.get("NEORX_TORCH_THREADS", min(4, os.cpu_count() or 1))))
+        torch.set_num_threads(threads)
         checkpoint_path = os.environ.get("NEORX_MODEL_PATH")
-        baseline_name = os.environ.get("NEORX_BASELINE_WEIGHTS", "densenet121-res224-all")
+        baseline_name = os.environ.get("NEORX_BASELINE_WEIGHTS", "resnet50-res512-all")
         cache_path = os.environ.get("NEORX_MODEL_CACHE", "")
         revision = None
         if checkpoint_path and Path(checkpoint_path).is_file():
@@ -211,11 +232,6 @@ class DetectorTorax:
             cls._ready = False
             cls._modelo = None
             try:
-                threads = max(
-                    1,
-                    int(os.environ.get("NEORX_TORCH_THREADS", min(4, os.cpu_count() or 1))),
-                )
-                torch.set_num_threads(threads)
                 torch.backends.mkldnn.enabled = True
                 if checkpoint_path:
                     path_obj = Path(checkpoint_path)
@@ -243,14 +259,14 @@ class DetectorTorax:
     @classmethod
     def _cargar_baseline(cls):
         """Carga el baseline gratuito desde backend/models (ignorado por Git)."""
-        model_name = os.environ.get("NEORX_BASELINE_WEIGHTS", "densenet121-res224-all")
+        model_name = os.environ.get("NEORX_BASELINE_WEIGHTS", "resnet50-res512-all")
         cache_dir = Path(os.environ.get(
             "NEORX_MODEL_CACHE",
             Path(__file__).resolve().parent.parent / "models",
         ))
         cache_dir.mkdir(parents=True, exist_ok=True)
 
-        threads = max(1, int(os.environ.get("NEORX_TORCH_THREADS", min(8, os.cpu_count() or 1))))
+        threads = max(1, int(os.environ.get("NEORX_TORCH_THREADS", min(4, os.cpu_count() or 1))))
         torch.set_num_threads(threads)
         torch.backends.mkldnn.enabled = True
 
@@ -269,6 +285,10 @@ class DetectorTorax:
         ])
         cls._labels_es = PATOLOGIAS_NEUMOLOGIA_BASELINE
         cls._thresholds = {label: 0.5 for label in cls._modelo.pathologies}
+        cls._decision_policy = {}
+        cls._decision_strategy = None
+        cls._model_metrics = {}
+        cls._training_info = {}
         cls._is_finetuned = False
         cls._model_name = model_name
         print(f"[DetectorTorax] {model_name} listo ({cls._input_size}px, {threads} hilos CPU).")
@@ -301,11 +321,26 @@ class DetectorTorax:
             else:
                 print("[DetectorTorax] WARNING: No thresholds found in checkpoint, using 0.5 default")
                 cls._thresholds = {label: 0.5 for label in pathologies}
+            cls._decision_policy = ckpt.get("decision_policy", {})
+            extra = ckpt.get('extra', {})
+            config = extra.get('config', {})
+            cls._decision_strategy = config.get('decision_strategy')
+            cls._model_metrics = dict(ckpt.get('metrics', {}))
+            per_class_auc = cls._model_metrics.get('per_class_auc', [])
+            if len(per_class_auc) == len(pathologies):
+                cls._model_metrics['per_class_auc_by_label'] = dict(zip(pathologies, per_class_auc))
+            cls._training_info = {
+                'epoca_seleccionada': int(extra.get('epoch', 0)) + 1,
+                'fase': extra.get('phase'),
+                'conjunto_metricas': 'validacion',
+                'entrenado_por': 'NeoRX',
+            }
 
             cls._is_finetuned = True
 
             cls._input_size = cls._finetuned_input_size()
-            cls._model_name = "resnet50_finetuned_nih"
+            experiment = extra.get("experiment") or config.get("experiment", {})
+            cls._model_name = experiment.get("name") or f"resnet50_finetuned_{len(pathologies)}"
             cls._transform = torchvision.transforms.Compose([
                 xrv.datasets.XRayCenterCrop(),
                 xrv.datasets.XRayResizer(cls._input_size),
@@ -329,7 +364,7 @@ class DetectorTorax:
     @classmethod
     def _precalentar(cls):
         """Ejecuta una pasada vacía para que la primera radiografía sea rápida."""
-        sample = torch.linspace(-1024.0, 1024.0, cls._input_size * cls._input_size, dtype=torch.float32).reshape(1, 1, cls._input_size, cls._input_size)
+        sample = torch.linspace(-1024.0, 1024.0, cls._input_size * cls._input_size, dtype=torch.float32).reshape(1, 1, cls._input_size, cls._input_size).contiguous(memory_format=torch.channels_last)
         with torch.inference_mode():
             cls._modelo(sample)
 
@@ -357,17 +392,19 @@ class DetectorTorax:
         {
             "hallazgos": [
                 {
-                    "etiqueta": "Nódulo pulmonar",
-                    "etiqueta_en": "Nodule",
+                    "etiqueta": "Neumotórax",
+                    "etiqueta_en": "Pneumothorax",
                     "probabilidad_estimada": 0.82,
                     "detectado": true,
-                    "threshold_usado": 0.35
+                    "threshold_usado": 0.74,
+                    "decision_habilitada": true
                 },
                 ...
             ],
-            "probabilidades": {"Nodule": 0.82, ...},
-            "thresholds": {"Nodule": 0.35, ...},
-            "modelo": "resnet50_finetuned_nih" | "resnet50_baseline",
+            "probabilidades": {"Pneumothorax": 0.82, ...},
+            "thresholds": {"Pneumothorax": 0.74, ...},
+            "decision": {"estado": "hallazgo_detectado", ...},
+            "modelo": "neorx_focused3_v1" | "resnet50_baseline",
             "es_fine_tuned": true/false,
             "nota": "Resultado preliminar - requiere revisión profesional."
         }
@@ -391,32 +428,103 @@ class DetectorTorax:
         probs = dict(zip(modelo.pathologies, salida))
         thresholds = cls._thresholds or {label: 0.5 for label in modelo.pathologies}
 
+        decision_mode = os.environ.get('NEORX_DECISION_MODE', '')
+        if not cls._is_finetuned and decision_mode == 'pretrained_effusion_categories':
+            from .pretrained_policy import pretrained_result
+            try:
+                minimum_score = float(os.environ.get('NEORX_BASELINE_MIN_SCORE', '0.50'))
+                category_margin = float(os.environ.get('NEORX_CATEGORY_MARGIN', '0.10'))
+                result = pretrained_result(
+                    {key: float(value) for key, value in probs.items()},
+                    {**NIH_LABELS_ES, **(cls._labels_es or {})},
+                    minimum_score=minimum_score,
+                    category_margin=category_margin,
+                )
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f'Configuración de decisión preentrenada no válida: {exc}') from exc
+            return {
+                **result, 'modelo': cls._model_name, 'es_fine_tuned': False,
+                'resolucion_entrada': cls._input_size, 'puntuaciones_calibradas': False,
+                'advertencias': [
+                    f'Modo temporal con {cls._model_name}; el umbral no fue ajustado con datos locales.',
+                    'Tuberculosis no es una salida del modelo y no puede confirmarse con esta clasificación.',
+                ],
+                'nota': 'Orientación radiográfica experimental; no confirma ni descarta enfermedad.',
+            }
+
+        if cls._decision_strategy or decision_mode == 'priority_category':
+            from .priority_policy import priority_result
+            result = priority_result(
+                {key: float(value) for key, value in probs.items()},
+                cls._thresholds or {}, cls._decision_policy or {},
+                {**NIH_LABELS_ES, **(cls._labels_es or {})}, cls._decision_strategy,
+            )
+            demo_enabled = os.environ.get('NEORX_DEMO_ORIENTATION', '').strip().lower() in {
+                '1', 'true', 'yes', 'on'
+            }
+            if demo_enabled:
+                from .priority_policy import add_experimental_orientation
+                try:
+                    result = add_experimental_orientation(
+                        result,
+                        {key: float(value) for key, value in probs.items()},
+                        {**NIH_LABELS_ES, **(cls._labels_es or {})},
+                        minimum_score=float(os.environ.get('NEORX_DEMO_MIN_SCORE', '0.50')),
+                        category_margin=float(os.environ.get('NEORX_DEMO_CATEGORY_MARGIN', '0.08')),
+                    )
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(f'Configuración de demostración no válida: {exc}') from exc
+            return {
+                **result, 'modelo': cls._model_name, 'es_fine_tuned': cls._is_finetuned,
+                'resolucion_entrada': cls._input_size, 'puntuaciones_calibradas': False,
+                'metricas_modelo': cls._model_metrics or {},
+                'informacion_entrenamiento': cls._training_info or {},
+                'advertencias': ([
+                    'MODO DEMOSTRACIÓN: orientación experimental no validada para uso clínico.'
+                ] if result.get('demostracion', {}).get('activa') else []),
+                'nota': 'Apoyo radiográfico; no confirma ni descarta enfermedad.',
+            }
+
         hallazgos = []
         prob_dict = {}
         thresh_dict = {}
 
+        scoped_labels = supported_category_labels(modelo.pathologies)
+
         for clave in modelo.pathologies:
+            if clave not in scoped_labels:
+                continue
             if clave not in probs or np.isnan(probs[clave]):
                 continue
 
             prob = float(probs[clave])
             threshold = float(thresholds.get(clave, 0.5))
-            detectado = prob >= threshold
+            class_policy = (cls._decision_policy or {}).get(clave, {})
+            decision_enabled = bool(class_policy.get("enabled", False))
+            detectado = decision_enabled and prob >= threshold
+            # Compare relative excess over the validated operating threshold.
+            # Dividing by (1-threshold) would exaggerate tiny changes for a
+            # conservative threshold close to 1.0.
+            denominator = max(threshold, 1e-6)
+            evidence = max(0.0, min(1.0, (prob - threshold) / denominator)) if detectado else 0.0
 
             nombre_es = cls._labels_es.get(clave, clave)
 
             prob_dict[clave] = prob
             thresh_dict[clave] = threshold
 
-            # Solo incluir patologías pulmonares (excluir Cardiomegaly, Hernia si están presentes)
-            if clave in PULMONARY_LABELS:
-                hallazgos.append({
-                    "etiqueta": nombre_es,
-                    "etiqueta_en": clave,
-                    "probabilidad_estimada": prob,
-                    "detectado": bool(detectado),
-                    "threshold_usado": threshold,
-                })
+            hallazgos.append({
+                "etiqueta": nombre_es,
+                "etiqueta_en": clave,
+                "probabilidad_estimada": prob,
+                "detectado": bool(detectado),
+                "threshold_usado": threshold,
+                "decision_habilitada": decision_enabled,
+                "estado_validacion": class_policy.get("status", "sin_politica_validada"),
+                "categoria": CATEGORY_BY_LABEL[clave],
+                "categoria_nombre": CATEGORY_DEFINITIONS[CATEGORY_BY_LABEL[clave]]["nombre"],
+                "evidencia_categoria": evidence,
+            })
 
         # Ordenar por probabilidad descendente
         hallazgos.sort(key=lambda x: x["probabilidad_estimada"], reverse=True)
@@ -426,6 +534,53 @@ class DetectorTorax:
             advertencias.append("Resolución distinta de los 512 px del entrenamiento; las puntuaciones requieren reevaluación.")
         if sum(float(value) >= 0.995 for value in salida) >= 2:
             advertencias.append("Salida saturada en varias clases. Revisar imagen y dominio de adquisición; no equivale a certeza diagnóstica.")
+        category = select_primary_category(hallazgos)
+        enabled_labels = [item for item in hallazgos if item["decision_habilitada"]]
+        if not scoped_labels or not enabled_labels:
+            category = {
+                **category,
+                "estado": "modelo_pendiente_validacion",
+                "clave": None,
+                "nombre": "No concluyente",
+                "mensaje": "El checkpoint activo no habilita decisiones validadas para las cuatro categorías.",
+                "enfermedades": [],
+            }
+            decision = {
+                "estado": "modelo_pendiente_validacion",
+                "titulo": "Resultado no concluyente",
+                "mensaje": (
+                    "El modelo cargado no habilita decisiones validadas para las cuatro categorías. "
+                    "Las puntuaciones técnicas no se convierten en diagnóstico."
+                ),
+                "hallazgos_principales": [],
+            }
+        elif category["estado"] == "no_concluyente":
+            decision = {
+                "estado": "indeterminado",
+                "titulo": "Sin evidencia suficiente",
+                "mensaje": (
+                    "Ninguna categoría alcanzó sus criterios validados. "
+                    "Esto no descarta enfermedad."
+                ),
+                "hallazgos_principales": [],
+            }
+        elif category["estado"] == "ambigua":
+            decision = {
+                "estado": "categoria_ambigua",
+                "titulo": "Categoría no concluyente",
+                "mensaje": category["mensaje"],
+                "hallazgos_principales": [],
+            }
+        else:
+            detected_in_category = [
+                item["etiqueta"] for item in category["enfermedades"] if item["detectado"]
+            ]
+            decision = {
+                "estado": "categoria_detectada",
+                "titulo": f"Categoría principal: {category['nombre']}",
+                "mensaje": category["mensaje"],
+                "hallazgos_principales": detected_in_category,
+            }
         return {
             "hallazgos": hallazgos,
             "probabilidades": prob_dict,
@@ -434,6 +589,9 @@ class DetectorTorax:
             "es_fine_tuned": cls._is_finetuned,
             "resolucion_entrada": cls._input_size,
             "advertencias": advertencias,
+            "decision": decision,
+            "categoria": category,
+            "alcance": [cls._labels_es.get(label, label) for label in scoped_labels],
             "puntuaciones_calibradas": False,
             "nota": "Resultado preliminar de apoyo; requiere revisión profesional.",
         }

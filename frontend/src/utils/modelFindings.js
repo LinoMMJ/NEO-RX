@@ -4,7 +4,8 @@ export function partitionFindings(scores = {}, findings = []) {
       const finding = findings.find((item) => item.etiqueta === name)
       const threshold = finding?.threshold_usado
       const known = Number.isFinite(threshold) && threshold >= 0 && threshold <= 1
-      return { name, score, threshold: known ? threshold : null, above: known && score >= threshold }
+      const enabled = finding?.decision_habilitada !== false
+      return { name, score, threshold: known ? threshold : null, enabled, above: enabled && known && score >= threshold }
     }).sort((a, b) => b.score - a.score)
   return { rows, candidates: rows.filter((row) => row.above), other: rows.filter((row) => !row.above) }
 }

@@ -149,6 +149,69 @@ def test_fixed_precision_uses_conservative_fallback_when_target_is_impossible():
     assert threshold == 0.85
 
 
+def test_guarded_threshold_disables_class_when_recall_floor_is_not_met():
+    optimizer = ThresholdOptimizer(
+        method="precision_recall_guarded",
+        target_precision=0.9,
+        min_sensitivity=0.75,
+        min_predictions=2,
+        min_positive_support=2,
+    )
+    truth = np.array([[1], [1], [0], [0]])
+    scores = np.array([[0.95], [0.20], [0.90], [0.10]])
+    result = optimizer.get_detailed_results(truth, scores, ["Finding"])["Finding"]
+    assert result.enabled is False
+    assert result.status == "operating_point_not_met"
+
+
+def test_guarded_threshold_keeps_supported_operating_point():
+    optimizer = ThresholdOptimizer(
+        method="precision_recall_guarded",
+        target_precision=0.9,
+        min_sensitivity=1.0,
+        min_predictions=2,
+        min_positive_support=2,
+    )
+    truth = np.array([[1], [1], [0], [0]])
+    scores = np.array([[0.95], [0.90], [0.20], [0.10]])
+    result = optimizer.get_detailed_results(truth, scores, ["Finding"])["Finding"]
+    assert result.enabled is True
+    assert result.threshold == 0.9
+    assert result.predicted_positive == 2
+
+
+def test_sensitivity_specificity_guard_disables_weak_class():
+    optimizer = ThresholdOptimizer(
+        method="sensitivity_specificity_guarded",
+        target_sensitivity=0.80,
+        min_specificity=0.75,
+        min_predictions=2,
+        min_positive_support=2,
+    )
+    truth = np.array([[1], [1], [1], [1], [0], [0], [0], [0]])
+    # Reaching 80% sensitivity requires including too many negatives.
+    scores = np.array([[0.95], [0.80], [0.55], [0.40], [0.90], [0.70], [0.50], [0.10]])
+    result = optimizer.get_detailed_results(truth, scores, ["Finding"])["Finding"]
+    assert result.enabled is False
+    assert result.status == "operating_point_not_met"
+
+
+def test_sensitivity_specificity_guard_keeps_supported_class():
+    optimizer = ThresholdOptimizer(
+        method="sensitivity_specificity_guarded",
+        target_sensitivity=0.80,
+        min_specificity=0.75,
+        min_predictions=2,
+        min_positive_support=2,
+    )
+    truth = np.array([[1], [1], [1], [1], [0], [0], [0], [0]])
+    scores = np.array([[0.95], [0.90], [0.85], [0.80], [0.30], [0.20], [0.10], [0.05]])
+    result = optimizer.get_detailed_results(truth, scores, ["Finding"])["Finding"]
+    assert result.enabled is True
+    assert result.validation_sensitivity >= 0.80
+    assert result.validation_specificity >= 0.75
+
+
 def test_decision_summary_measures_multiple_and_false_positive_findings():
     from training.evaluate import decision_summary
 

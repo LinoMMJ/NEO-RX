@@ -5,7 +5,8 @@ Optimizes decision thresholds on VALIDATION set only.
 Never uses TEST set for threshold selection.
 
 Method: Youden's J statistic (sensitivity + specificity - 1)
-Supports Youden J, F1-max, fixed sensitivity and fixed precision.
+Supports Youden J, F1-max, fixed sensitivity, fixed precision and a guarded
+precision/recall operating point that can disable unsupported classes.
 
 All results are PENDIENTE DE EJECUCIÓN EXPERIMENTAL.
 """
@@ -30,6 +31,9 @@ class ThresholdResult:
     selection_method: str
     n_positive: int
     n_negative: int
+    enabled: bool = True
+    status: str = "enabled"
+    predicted_positive: int = 0
 
 
 class ThresholdOptimizer:
@@ -45,10 +49,16 @@ class ThresholdOptimizer:
         min_threshold: float = 0.05,
         max_threshold: float = 0.95,
         target_precision: float = 0.85,
+        min_sensitivity: float = 0.0,
+        target_sensitivity: float = 0.80,
+        min_specificity: float = 0.0,
+        min_predictions: int = 1,
+        min_positive_support: int = 1,
     ):
         """
         Args:
-            method: "youden_j", "f1_max", "fixed_sensitivity", "fixed_precision"
+            method: "youden_j", "f1_max", "fixed_sensitivity",
+                "fixed_precision" or "precision_recall_guarded"
             min_threshold: Minimum threshold to consider
             max_threshold: Maximum threshold to consider
         """
@@ -58,6 +68,19 @@ class ThresholdOptimizer:
         if not 0 < target_precision <= 1:
             raise ValueError("target_precision must be in (0, 1]")
         self.target_precision = target_precision
+        if not 0 <= min_sensitivity <= 1:
+            raise ValueError("min_sensitivity must be in [0, 1]")
+        if min_predictions < 1 or min_positive_support < 1:
+            raise ValueError("minimum support values must be positive")
+        self.min_sensitivity = min_sensitivity
+        if not 0 < target_sensitivity <= 1:
+            raise ValueError("target_sensitivity must be in (0, 1]")
+        if not 0 <= min_specificity <= 1:
+            raise ValueError("min_specificity must be in [0, 1]")
+        self.target_sensitivity = target_sensitivity
+        self.min_specificity = min_specificity
+        self.min_predictions = int(min_predictions)
+        self.min_positive_support = int(min_positive_support)
 
     def optimize(
         self,
@@ -109,6 +132,12 @@ class ThresholdOptimizer:
             return self._fixed_sensitivity_threshold(y_true, y_scores, target_sensitivity=0.90)
         elif self.method == "fixed_precision":
             return self._fixed_precision_threshold(y_true, y_scores, self.target_precision)
+        elif self.method == "precision_recall_guarded":
+            threshold = self._guarded_threshold(y_true, y_scores)
+            return self.max_threshold if threshold is None else threshold
+        elif self.method == "sensitivity_specificity_guarded":
+            threshold = self._sensitivity_specificity_guarded_threshold(y_true, y_scores)
+            return self.max_threshold if threshold is None else threshold
         else:
             raise ValueError(f"Unknown threshold method: {self.method}")
 
@@ -216,6 +245,73 @@ class ThresholdOptimizer:
         best = max(indices, key=lambda i: (recall[i], precision[i], thresholds[i]))
         return float(thresholds[best])
 
+    def _guarded_threshold(
+        self,
+        y_true: np.ndarray,
+        y_scores: np.ndarray,
+    ) -> Optional[float]:
+        """Select a threshold only when validation supports a useful decision.
+
+        Unlike the legacy fixed-precision method, failure to meet the requested
+        precision, sensitivity and sample-support floors returns ``None``.  The
+        caller then records the class as disabled instead of manufacturing a
+        very high threshold with near-zero recall.
+        """
+        if int(y_true.sum()) < self.min_positive_support:
+            return None
+        precision, recall, thresholds = precision_recall_curve(y_true, y_scores)
+        if not len(thresholds):
+            return None
+        precision = precision[:-1]
+        recall = recall[:-1]
+        sorted_scores = np.sort(y_scores)
+        predicted_positive = len(sorted_scores) - np.searchsorted(
+            sorted_scores, thresholds, side="left"
+        )
+        valid = (
+            (thresholds >= self.min_threshold)
+            & (thresholds <= self.max_threshold)
+            & (precision >= self.target_precision)
+            & (recall >= self.min_sensitivity)
+            & (predicted_positive >= self.min_predictions)
+        )
+        if not valid.any():
+            return None
+        indices = np.where(valid)[0]
+        best = max(indices, key=lambda i: (recall[i], precision[i], thresholds[i]))
+        return float(thresholds[best])
+
+    def _sensitivity_specificity_guarded_threshold(
+        self,
+        y_true: np.ndarray,
+        y_scores: np.ndarray,
+    ) -> Optional[float]:
+        """Meet a sensitivity target without accepting unusable specificity.
+
+        This is intended for screening-style support.  If validation cannot
+        satisfy both floors, the class is disabled rather than silently
+        lowering the decision threshold and flooding the UI with positives.
+        """
+        if int(y_true.sum()) < self.min_positive_support:
+            return None
+        fpr, tpr, thresholds = roc_curve(y_true, y_scores)
+        specificity = 1.0 - fpr
+        predicted_positive = np.asarray([(y_scores >= value).sum() for value in thresholds])
+        valid = (
+            (thresholds >= self.min_threshold)
+            & (thresholds <= self.max_threshold)
+            & (tpr >= self.target_sensitivity)
+            & (specificity >= self.min_specificity)
+            & (predicted_positive >= self.min_predictions)
+        )
+        if not valid.any():
+            return None
+        indices = np.where(valid)[0]
+        # Prefer specificity once the requested sensitivity is reached; ties
+        # prefer greater sensitivity and then the more conservative threshold.
+        best = max(indices, key=lambda i: (specificity[i], tpr[i], thresholds[i]))
+        return float(thresholds[best])
+
     def get_detailed_results(
         self,
         y_true: np.ndarray,
@@ -235,8 +331,11 @@ class ThresholdOptimizer:
             n_neg = len(y_true) - n_pos
 
             if n_pos == 0 or n_neg == 0:
+                guarded = self.method in {
+                    "precision_recall_guarded", "sensitivity_specificity_guarded"
+                }
                 results[label] = ThresholdResult(
-                    threshold=0.5,
+                    threshold=self.max_threshold if guarded else 0.5,
                     validation_auc=float("nan"),
                     validation_f1=float("nan"),
                     validation_sensitivity=float("nan"),
@@ -245,6 +344,8 @@ class ThresholdOptimizer:
                     selection_method=self.method,
                     n_positive=n_pos,
                     n_negative=n_neg,
+                    enabled=not guarded,
+                    status="insufficient_classes" if guarded else "enabled",
                 )
                 continue
 
@@ -255,8 +356,26 @@ class ThresholdOptimizer:
             except (ImportError, ValueError):
                 auc = float("nan")
 
-            # Find optimal threshold
-            threshold = self._optimize_single_class(y_true[:, i], y_scores[:, i], label)
+            enabled = True
+            status = "enabled"
+            if self.method in {"precision_recall_guarded", "sensitivity_specificity_guarded"}:
+                if n_pos < self.min_positive_support:
+                    threshold = self.max_threshold
+                    enabled = False
+                    status = "insufficient_positive_support"
+                else:
+                    candidate = (
+                        self._guarded_threshold(y_true[:, i], y_scores[:, i])
+                        if self.method == "precision_recall_guarded"
+                        else self._sensitivity_specificity_guarded_threshold(
+                            y_true[:, i], y_scores[:, i]
+                        )
+                    )
+                    threshold = self.max_threshold if candidate is None else candidate
+                    enabled = candidate is not None
+                    status = "enabled" if enabled else "operating_point_not_met"
+            else:
+                threshold = self._optimize_single_class(y_true[:, i], y_scores[:, i], label)
             preds = (y_scores[:, i] >= threshold).astype(int)
 
             # Compute metrics at this threshold
@@ -280,6 +399,9 @@ class ThresholdOptimizer:
                 selection_method=self.method,
                 n_positive=n_pos,
                 n_negative=n_neg,
+                enabled=enabled,
+                status=status,
+                predicted_positive=int(preds.sum()),
             )
 
         return results
@@ -295,7 +417,7 @@ def save_thresholds_csv(results: Dict[str, ThresholdResult], output_path: Path) 
             "class", "threshold", "validation_auc", "validation_f1",
             "validation_sensitivity", "validation_specificity",
             "validation_precision", "selection_method",
-            "n_positive", "n_negative"
+            "n_positive", "n_negative", "predicted_positive", "enabled", "status"
         ])
         for label, result in results.items():
             writer.writerow([
@@ -309,6 +431,9 @@ def save_thresholds_csv(results: Dict[str, ThresholdResult], output_path: Path) 
                 result.selection_method,
                 result.n_positive,
                 result.n_negative,
+                result.predicted_positive,
+                str(result.enabled).lower(),
+                result.status,
             ])
 
 

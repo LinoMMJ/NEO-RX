@@ -1,0 +1,202 @@
+[
+  {
+    "disease": "Effusion",
+    "expected_head": "Effusion",
+    "image_id": "00010834_000.png",
+    "source_labels": [
+      "Effusion"
+    ],
+    "saved_validation_score": 0.9975492358207703,
+    "single_label": true,
+    "route_matches_demo": true,
+    "saved_scores": {
+      "Effusion": 0.9975492358207703,
+      "CategoryTumoral": 0.7317844033241272,
+      "CategoryPleural": 0.9929078817367554,
+      "CategoryInfectious": 0.5783281922340393,
+      "CategoryInterstitial": 0.34060871601104736
+    },
+    "local_file": "01_derrame_pleural__00010834_000.png",
+    "source_url": "https://nih-chest-x-rays.s3.us-east-2.amazonaws.com/images_1024x1024/00010834_000.png"
+  },
+  {
+    "disease": "Mass",
+    "expected_head": "CategoryTumoral",
+    "image_id": "00009671_004.png",
+    "source_labels": [
+      "Mass"
+    ],
+    "saved_validation_score": 0.999886155128479,
+    "single_label": true,
+    "route_matches_demo": true,
+    "saved_scores": {
+      "Effusion": 0.19355161488056183,
+      "CategoryTumoral": 0.999886155128479,
+      "CategoryPleural": 0.262830913066864,
+      "CategoryInfectious": 0.15135817229747772,
+      "CategoryInterstitial": 0.06287606805562973
+    },
+    "local_file": "02_masa_pulmonar__00009671_004.png",
+    "source_url": "https://nih-chest-x-rays.s3.us-east-2.amazonaws.com/images_1024x1024/00009671_004.png"
+  },
+  {
+    "disease": "Nodule",
+    "expected_head": "CategoryTumoral",
+    "image_id": "00028416_001.png",
+    "source_labels": [
+      "Nodule"
+    ],
+    "saved_validation_score": 0.9998667240142822,
+    "single_label": true,
+    "route_matches_demo": true,
+    "saved_scores": {
+      "Effusion": 0.12788106501102448,
+      "CategoryTumoral": 0.9998667240142822,
+      "CategoryPleural": 0.15988442301750183,
+      "CategoryInfectious": 0.06925896555185318,
+      "CategoryInterstitial": 0.06848574429750443
+    },
+    "local_file": "03_nodulo_pulmonar__00028416_001.png",
+    "source_url": "https://nih-chest-x-rays.s3.us-east-2.amazonaws.com/images_1024x1024/00028416_001.png"
+  },
+  {
+    "disease": "Pneumothorax",
+    "expected_head": "CategoryPleural",
+    "image_id": "00027092_004.png",
+    "source_labels": [
+      "Pneumothorax"
+    ],
+    "saved_validation_score": 0.9649465084075928,
+    "single_label": true,
+    "route_matches_demo": true,
+    "saved_scores": {
+      "Effusion": 0.4487704634666443,
+      "CategoryTumoral": 0.28529688715934753,
+      "CategoryPleural": 0.9649465084075928,
+      "CategoryInfectious": 0.03731072321534157,
+      "CategoryInterstitial": 0.21982382237911224
+    },
+    "local_file": "04_neumotorax__00027092_004.png",
+    "source_url": "https://nih-chest-x-rays.s3.us-east-2.amazonaws.com/images_1024x1024/00027092_004.png"
+  },
+  {
+    "disease": "Pleural_Thickening",
+    "expected_head": "CategoryPleural",
+    "image_id": "00019373_012.png",
+    "source_labels": [
+      "Pleural_Thickening"
+    ],
+    "saved_validation_score": 0.8989902138710022,
+    "single_label": true,
+    "route_matches_demo": true,
+    "saved_scores": {
+      "Effusion": 0.4449765086174011,
+      "CategoryTumoral": 0.8056837916374207,
+      "CategoryPleural": 0.8989902138710022,
+      "CategoryInfectious": 0.23899097740650177,
+      "CategoryInterstitial": 0.23088957369327545
+    },
+    "local_file": "05_engrosamiento_pleural__00019373_012.png",
+    "source_url": "https://nih-chest-x-rays.s3.us-east-2.amazonaws.com/images_1024x1024/00019373_012.png"
+  },
+  {
+    "disease": "Pneumonia",
+    "expected_head": "CategoryInfectious",
+    "image_id": "00026629_006.png",
+    "source_labels": [
+      "Pneumonia"
+    ],
+    "saved_validation_score": 0.8116000294685364,
+    "single_label": true,
+    "route_matches_demo": true,
+    "saved_scores": {
+      "Effusion": 0.19749632477760315,
+      "CategoryTumoral": 0.6023273468017578,
+      "CategoryPleural": 0.2729703485965729,
+      "CategoryInfectious": 0.8116000294685364,
+      "CategoryInterstitial": 0.694071888923645
+    },
+    "local_file": "06_neumonia__00026629_006.png",
+    "source_url": "https://nih-chest-x-rays.s3.us-east-2.amazonaws.com/images_1024x1024/00026629_006.png"
+  },
+  {
+    "disease": "Consolidation",
+    "expected_head": "CategoryInfectious",
+    "image_id": "00005600_011.png",
+    "source_labels": [
+      "Consolidation"
+    ],
+    "saved_validation_score": 0.5049888491630554,
+    "single_label": true,
+    "route_matches_demo": true,
+    "saved_scores": {
+      "Effusion": 0.3172759711742401,
+      "CategoryTumoral": 0.15833334624767303,
+      "CategoryPleural": 0.3396875858306885,
+      "CategoryInfectious": 0.5049888491630554,
+      "CategoryInterstitial": 0.40044042468070984
+    },
+    "local_file": "07_consolidacion__00005600_011.png",
+    "source_url": "https://nih-chest-x-rays.s3.us-east-2.amazonaws.com/images_1024x1024/00005600_011.png"
+  },
+  {
+    "disease": "Fibrosis",
+    "expected_head": "CategoryInterstitial",
+    "image_id": "00004409_001.png",
+    "source_labels": [
+      "Fibrosis"
+    ],
+    "saved_validation_score": 0.8518857955932617,
+    "single_label": true,
+    "route_matches_demo": true,
+    "saved_scores": {
+      "Effusion": 0.08972230553627014,
+      "CategoryTumoral": 0.7453397512435913,
+      "CategoryPleural": 0.28595298528671265,
+      "CategoryInfectious": 0.6147632598876953,
+      "CategoryInterstitial": 0.8518857955932617
+    },
+    "local_file": "08_fibrosis__00004409_001.png",
+    "source_url": "https://nih-chest-x-rays.s3.us-east-2.amazonaws.com/images_1024x1024/00004409_001.png"
+  },
+  {
+    "disease": "Edema",
+    "expected_head": "CategoryInterstitial",
+    "image_id": "00003534_037.png",
+    "source_labels": [
+      "Edema"
+    ],
+    "saved_validation_score": 0.9153955578804016,
+    "single_label": true,
+    "route_matches_demo": true,
+    "saved_scores": {
+      "Effusion": 0.07869508862495422,
+      "CategoryTumoral": 0.4707760512828827,
+      "CategoryPleural": 0.1676263064146042,
+      "CategoryInfectious": 0.6763519644737244,
+      "CategoryInterstitial": 0.9153955578804016
+    },
+    "local_file": "09_edema__00003534_037.png",
+    "source_url": "https://nih-chest-x-rays.s3.us-east-2.amazonaws.com/images_1024x1024/00003534_037.png"
+  },
+  {
+    "disease": "Infiltration",
+    "expected_head": "CategoryInterstitial",
+    "image_id": "00001381_003.png",
+    "source_labels": [
+      "Infiltration"
+    ],
+    "saved_validation_score": 0.9400715231895447,
+    "single_label": true,
+    "route_matches_demo": true,
+    "saved_scores": {
+      "Effusion": 0.2814943790435791,
+      "CategoryTumoral": 0.42496728897094727,
+      "CategoryPleural": 0.2861652970314026,
+      "CategoryInfectious": 0.7913684248924255,
+      "CategoryInterstitial": 0.9400715231895447
+    },
+    "local_file": "10_infiltrado__00001381_003.png",
+    "source_url": "https://nih-chest-x-rays.s3.us-east-2.amazonaws.com/images_1024x1024/00001381_003.png"
+  }
+]

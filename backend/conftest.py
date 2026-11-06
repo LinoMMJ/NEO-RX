@@ -103,9 +103,13 @@ def imagen_con_resultado(imagen_dicom):
 @pytest.fixture(autouse=True)
 def isolate_cnn_singleton(monkeypatch):
     from diagnostico.services import DetectorTorax
-    for attr, value in {"_modelo": None, "_transform": None, "_labels_es": {}, "_thresholds": {}, "_is_finetuned": False}.items():
+    for attr, value in {"_modelo": None, "_transform": None, "_labels_es": {}, "_thresholds": {}, "_decision_policy": {}, "_is_finetuned": False}.items():
         monkeypatch.setattr(DetectorTorax, attr, value)
     monkeypatch.delenv("NEORX_MODEL_PATH", raising=False)
+    # Existing regression cases cover legacy checkpoints; priority-policy cases
+    # explicitly enable the new flow or exercise its pure decision function.
+    monkeypatch.delenv('NEORX_DECISION_MODE', raising=False)
+    monkeypatch.setattr(DetectorTorax, '_decision_strategy', None)
     import torchxrayvision as xrv
     def deny_real_model(*args, **kwargs):
         raise AssertionError("Esta suite comprueba software; no permite descargar/cargar pesos reales.")
