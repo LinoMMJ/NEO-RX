@@ -1,5 +1,12 @@
 from pathlib import Path
 
+import pytest
+
+pytest.importorskip(
+    "sklearn",
+    reason="La suite del pipeline requiere backend/training/requirements*.txt",
+)
+
 import numpy as np
 import pandas as pd
 import torch

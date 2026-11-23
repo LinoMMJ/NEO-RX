@@ -20,6 +20,7 @@ IMPORTANTE:
 Ubicación: backend/diagnostico/services.py
 """
 
+import json
 import os
 import sys
 import threading
@@ -221,8 +222,10 @@ class DetectorTorax:
         revision = None
         if checkpoint_path and Path(checkpoint_path).is_file():
             revision = Path(checkpoint_path).stat().st_mtime_ns
+        threshold_override = os.environ.get("NEORX_DECISION_THRESHOLDS_JSON", "").strip()
+        enable_override = os.environ.get("NEORX_ENABLE_THRESHOLD_DECISIONS", "").strip().lower()
         config_key = (checkpoint_path or "", revision, baseline_name, cache_path,
-                      cls._finetuned_input_size())
+                      cls._finetuned_input_size(), threshold_override, enable_override)
         if cls._ready and cls._config_key == config_key:
             return cls._modelo
 
@@ -322,6 +325,7 @@ class DetectorTorax:
                 print("[DetectorTorax] WARNING: No thresholds found in checkpoint, using 0.5 default")
                 cls._thresholds = {label: 0.5 for label in pathologies}
             cls._decision_policy = ckpt.get("decision_policy", {})
+            cls._apply_runtime_decision_overrides(pathologies)
             extra = ckpt.get('extra', {})
             config = extra.get('config', {})
             cls._decision_strategy = config.get('decision_strategy')
@@ -360,6 +364,66 @@ class DetectorTorax:
                 f"[DetectorTorax] ERROR loading fine-tuned checkpoint from {checkpoint_path}: {e}. "
                 f"NEORX_MODEL_PATH was set but model failed to load. Check file integrity."
             ) from e
+
+    @classmethod
+    def _apply_runtime_decision_overrides(cls, pathologies):
+        """Apply an explicit, auditable deployment operating point.
+
+        The model weights and raw scores are unchanged. Overrides are accepted
+        only when all checkpoint outputs are present exactly once, preventing a
+        partially configured deployment from mixing old and new thresholds.
+        Decisions are enabled separately and explicitly.
+        """
+        raw = os.environ.get("NEORX_DECISION_THRESHOLDS_JSON", "").strip()
+        if not raw:
+            return
+        try:
+            configured = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError("NEORX_DECISION_THRESHOLDS_JSON no contiene JSON válido.") from exc
+        if not isinstance(configured, dict):
+            raise ValueError("NEORX_DECISION_THRESHOLDS_JSON debe ser un objeto JSON.")
+
+        expected = list(pathologies)
+        if set(configured) != set(expected):
+            missing = sorted(set(expected) - set(configured))
+            extra = sorted(set(configured) - set(expected))
+            raise ValueError(
+                "Los umbrales del despliegue deben coincidir con las salidas del checkpoint "
+                f"(faltan={missing}, sobran={extra})."
+            )
+
+        normalized = {}
+        for label in expected:
+            value = configured[label]
+            if isinstance(value, bool):
+                raise ValueError(f"Umbral inválido para {label}: {value!r}.")
+            try:
+                value = float(value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"Umbral inválido para {label}: {value!r}.") from exc
+            if not np.isfinite(value) or not 0.0 <= value <= 1.0:
+                raise ValueError(f"Umbral fuera de rango para {label}: {value!r}.")
+            normalized[label] = value
+
+        cls._thresholds = normalized
+        enabled = os.environ.get("NEORX_ENABLE_THRESHOLD_DECISIONS", "").strip().lower() in {
+            "1", "true", "yes", "on"
+        }
+        if enabled:
+            cls._decision_policy = {
+                label: {
+                    "enabled": True,
+                    "status": "validation_operating_point_selected",
+                    "threshold": normalized[label],
+                    "selection_method": "target_sensitivity_validation",
+                }
+                for label in expected
+            }
+        print(
+            "[DetectorTorax] Runtime validation thresholds applied; "
+            f"decisions_enabled={enabled}."
+        )
 
     @classmethod
     def _precalentar(cls):

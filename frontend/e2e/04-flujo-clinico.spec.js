@@ -23,13 +23,18 @@ test('flujo clínico: carga, CNN, resultado, Grad-CAM e informe', async ({ page,
   await page.getByLabel('Observaciones clínicas').fill('Caso automatizado para evidencia funcional Playwright.')
   await page.getByRole('button', { name: 'Validar y continuar' }).click()
 
-  await expect(page.getByText('Señal prioritaria: derrame pleural')).toBeVisible({ timeout: 180_000 })
+  const prioritizedFindings = page.getByRole('list', { name: 'Hallazgos prioritarios detectados' })
+  await expect(prioritizedFindings).toBeVisible({ timeout: 180_000 })
+  await expect(prioritizedFindings).toContainText('Derrame pleural')
+  await expect(prioritizedFindings).toContainText(/Puntuación:\s*\d+(?:\.\d+)?\/100/)
   await expect(page.getByText(/Nitidez OK/)).toBeVisible()
   await attachScreenshot(page, testInfo, '07-resultado-cnn-derrame')
 
-  await page.getByRole('button', { name: 'Generar mapa de calor del resultado principal' }).click()
-  await expect(page.getByRole('button', { name: 'Superposición CNN' })).toBeEnabled({ timeout: 120_000 })
-  await page.getByRole('button', { name: 'Superposición CNN' }).click()
+  const generateHeatmap = page.getByRole('button', { name: 'Generar mapa de calor del resultado principal' })
+  if (await generateHeatmap.isVisible()) await generateHeatmap.click()
+  const overlay = page.getByRole('button', { name: 'Superposición CNN' })
+  await expect(overlay).toBeEnabled({ timeout: 120_000 })
+  await overlay.click()
   await expect(page.getByText('Alta activación')).toBeVisible()
   await attachScreenshot(page, testInfo, '08-gradcam-regional')
 

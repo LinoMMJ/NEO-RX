@@ -1,6 +1,6 @@
 # Clasificación jerárquica en cuatro categorías
 
-> Diseño anterior. Desde el 23/10/2026 el nuevo flujo solicitado prioriza derrame pleural y atelectasia antes de recurrir a categorías. Véase [entrenamiento priority2](entrenamiento-priority2.md). Este documento describe el modo histórico, no el checkpoint nuevo.
+> Flujo vigente: derrame pleural es la única salida específica prioritaria. Si no supera su umbral, el sistema intenta presentar una sola orientación entre cuatro categorías.
 
 Neo RX organiza la salida radiográfica en cuatro grupos:
 
@@ -13,8 +13,16 @@ La CNN conserva salidas por hallazgo porque más de un patrón puede coexistir. 
 
 El frontend y los informes muestran solamente las enfermedades pertenecientes a la categoría seleccionada. Las cifras se denominan puntuaciones del modelo y no porcentajes de certeza diagnóstica.
 
-## Entrenamiento requerido
+## Checkpoint y punto operativo vigente
 
-La configuración `backend/training/config.categories4.kaggle.yaml` entrena las diez etiquetas necesarias y exige umbrales con precisión, sensibilidad y soporte mínimos. El checkpoint actualmente instalado (`neorx_focused5_resnet50.pt`) no contiene todas las etiquetas ni una política de decisión validada; por seguridad, la nueva capa se abstiene con ese archivo.
+El checkpoint `neorx_effusion_categories_resnet50.pt` contiene las cinco salidas
+del producto. Docker aplica los umbrales seleccionados en VALIDACIÓN mediante
+`NEORX_DECISION_THRESHOLDS_JSON` y exige habilitación explícita con
+`NEORX_ENABLE_THRESHOLD_DECISIONS=true`.
 
-Para habilitar las cuatro categorías se debe entrenar y evaluar `neorx_categories4_resnet50.pt`, copiarlo a `backend/models/` y configurar `NEORX_MODEL_PATH` con esa ruta. No se debe habilitar un checkpoint que no cumpla la validación independiente por paciente.
+La evaluación TEST confirmó alta sensibilidad, pero también numerosas falsas
+alertas. En las diez imágenes curadas de integración, el antiguo corte 0,99
+activó alguna salida en 3 casos; los nuevos puntos lo hicieron en los 10. Esta
+comparación demuestra el funcionamiento del umbral, no una mejora de exactitud.
+Antes de uso clínico se requiere calibración, un conjunto independiente y
+validación externa revisada por especialistas.

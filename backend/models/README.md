@@ -1,24 +1,37 @@
 # Modelos de Neo RX
 
-## ResNet-50 preentrenada activa
+## Checkpoint de cinco salidas activo
 
-La configuración local actual usa `resnet50-res512-all` de TorchXRayVision sin
-checkpoint propio. Presenta únicamente derrame pleural como hallazgo específico
-y, en su ausencia, una categoría predominante. El punto operativo normalizado es 0,50. Este
-modo no está calibrado con datos locales y no identifica tuberculosis.
+El despliegue Docker utiliza `neorx_effusion_categories_resnet50.pt`, una
+ResNet-50 ajustada a 512 px con derrame pleural como salida prioritaria y cuatro
+salidas agregadas: tumoral, pleural, infecciosa e intersticial. Los pesos no se
+modifican al cambiar el punto operativo.
 
-Los pesos oficiales se almacenan en este directorio para que la demostración no
-dependa de Internet. ResNet-50 trabaja a 512 px y tiene aproximadamente 25,5
-millones de parámetros. En la CPU de demostración tarda aproximadamente 14–16
-segundos por imagen después del precalentamiento.
+Los umbrales seleccionados en VALIDACIÓN y configurados para el despliegue son:
 
-## Entrenamiento futuro
+- `Effusion`: 0,1676508635
+- `CategoryTumoral`: 0,2112646401
+- `CategoryPleural`: 0,1613885313
+- `CategoryInfectious`: 0,1314414889
+- `CategoryInterstitial`: 0,2572275996
 
-El checkpoint futuro deberá respetar el mismo contrato de presentación del modo
-temporal: `Effusion` como única salida específica y cuatro salidas de categoría,
-junto con una `decision_policy` producida por validación. La configuración está
-en `training/config.priority2.kaggle.yaml`; el nombre se conserva por compatibilidad
-histórica aunque ahora existe una sola prioridad.
+La aplicación exige el conjunto completo mediante
+`NEORX_DECISION_THRESHOLDS_JSON` y habilitación explícita mediante
+`NEORX_ENABLE_THRESHOLD_DECISIONS=true`. Una configuración parcial detiene la
+carga para evitar combinar umbrales antiguos y nuevos.
+
+En TEST, estos puntos alcanzaron sensibilidades altas, pero especificidades y
+precisiones bajas. Para derrame pleural: 94,30 % de sensibilidad, 54,00 % de
+especificidad y 21,61 % de precisión. Por tanto, las salidas son señales para
+revisión profesional y no validan uso clínico autónomo.
+
+## Entrenamiento y validación futura
+
+Un nuevo entrenamiento deberá respetar el mismo contrato: `Effusion` como única
+salida específica y cuatro salidas de categoría, junto con una
+`decision_policy` producida exclusivamente con validación. La configuración está
+en `training/config.priority2.kaggle.yaml`; el nombre se conserva por
+compatibilidad histórica aunque ahora existe una sola prioridad.
 
 ## Checkpoint focused5 existente (solo referencia)
 

@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 import numpy as np
@@ -85,3 +86,44 @@ def test_service_uses_pretrained_policy_without_a_finetuned_checkpoint(monkeypat
     assert result['categoria']['clave'] == 'infecciosa'
     assert result['es_fine_tuned'] is False
     assert len(result['advertencias']) == 2
+
+
+def test_runtime_validation_thresholds_replace_all_checkpoint_decisions(monkeypatch):
+    labels = [
+        'Effusion', 'CategoryTumoral', 'CategoryPleural',
+        'CategoryInfectious', 'CategoryInterstitial',
+    ]
+    expected = {
+        'Effusion': 0.1676508635,
+        'CategoryTumoral': 0.2112646401,
+        'CategoryPleural': 0.1613885313,
+        'CategoryInfectious': 0.1314414889,
+        'CategoryInterstitial': 0.2572275996,
+    }
+    monkeypatch.setenv('NEORX_DECISION_THRESHOLDS_JSON', json.dumps(expected))
+    monkeypatch.setenv('NEORX_ENABLE_THRESHOLD_DECISIONS', 'true')
+    monkeypatch.setattr(DetectorTorax, '_thresholds', {label: .99 for label in labels})
+    monkeypatch.setattr(
+        DetectorTorax, '_decision_policy',
+        {label: {'enabled': False, 'threshold': .99} for label in labels},
+    )
+
+    DetectorTorax._apply_runtime_decision_overrides(labels)
+
+    assert DetectorTorax._thresholds == expected
+    assert all(DetectorTorax._decision_policy[label]['enabled'] for label in labels)
+    assert {
+        label: DetectorTorax._decision_policy[label]['threshold'] for label in labels
+    } == expected
+    assert all(
+        DetectorTorax._decision_policy[label]['status'] == 'validation_operating_point_selected'
+        for label in labels
+    )
+
+
+def test_runtime_threshold_override_rejects_partial_configuration(monkeypatch):
+    monkeypatch.setenv('NEORX_DECISION_THRESHOLDS_JSON', '{"Effusion": 0.167651}')
+    with pytest.raises(ValueError, match='deben coincidir'):
+        DetectorTorax._apply_runtime_decision_overrides(
+            ['Effusion', 'CategoryTumoral', 'CategoryPleural']
+        )

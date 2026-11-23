@@ -51,6 +51,7 @@ def test_invalid_primary_metadata_fails_closed(primary):
 
 
 def test_test_evaluation_uses_same_router_and_disabled_policies():
+    pytest.importorskip('sklearn', reason='Dependencia disponible solo en el entorno de entrenamiento')
     import numpy as np
     from training.evaluate import routing_summary
     targets = np.asarray([[1, 0, 0, 1, 0, 0], [0, 0, 1, 0, 0, 0], [0, 0, 0, 0, 0, 0]])
@@ -135,6 +136,7 @@ def test_derived_category_targets_preserve_coexisting_findings():
 
 
 def test_training_dataset_and_splitter_use_same_six_targets():
+    pytest.importorskip('sklearn', reason='Dependencia disponible solo en el entorno de entrenamiento')
     import pandas as pd
     from training.dataset import parse_finding_labels
     from training.create_splits import label_matrix
