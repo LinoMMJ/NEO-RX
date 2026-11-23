@@ -10,8 +10,10 @@ describe('ListaPatologias', () => {
   it('muestra la categoría sin exponer detalles técnicos del modelo', () => {
     render(<ListaPatologias enfoque={{ modo: 'preentrenado', estado: 'orientacion_categoria', hallazgos_detectados: [] }}
       decision={{ titulo: 'Orientación por categoría: Infecciosa', mensaje: 'Requiere revisión.' }}
-      categoria={{ estado: 'seleccionada', nombre: 'Infecciosa' }} />)
+      categoria={{ estado: 'seleccionada', nombre: 'Infecciosa', puntuacion_modelo: 0.824 }} />)
     expect(screen.getByLabelText('Categoría orientativa')).toHaveTextContent('Infecciosa')
+    expect(screen.getByLabelText('Puntuación del modelo para categoría Infecciosa')).toHaveTextContent('82.4/100')
+    expect(screen.queryByText('82.4%')).not.toBeInTheDocument()
     expect(screen.queryByText(/preentrenad/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/modo temporal/i)).not.toBeInTheDocument()
   })
@@ -32,6 +34,13 @@ describe('ListaPatologias', () => {
       categoria={{ estado: 'seleccionada', nombre: 'Tumoral' }} />)
     expect(screen.getByLabelText('Categoría orientativa')).toHaveTextContent('Tumoral')
     expect(screen.queryByLabelText('Hallazgos prioritarios detectados')).not.toBeInTheDocument()
+  })
+
+  it('mantiene compatibilidad con la puntuación técnica de resultados históricos', () => {
+    render(<ListaPatologias enfoque={{ estado: 'orientacion_categoria', hallazgos_detectados: [] }}
+      decision={{ titulo: 'Orientación por categoría: Intersticial', mensaje: 'Requiere revisión.' }}
+      categoria={{ estado: 'seleccionada', nombre: 'Intersticial', puntuacion_tecnica: 0.731 }} />)
+    expect(screen.getByLabelText('Puntuación del modelo para categoría Intersticial')).toHaveTextContent('73.1/100')
   })
   it('muestra una conclusión antes de la salida técnica', () => {
     render(<ListaPatologias patologias={scores} hallazgos={findings} alcance={['Neumotórax', 'Derrame pleural', 'Edema pulmonar']} />)

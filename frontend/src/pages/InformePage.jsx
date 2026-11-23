@@ -315,6 +315,7 @@ export default function InformePage() {
                   value={form[key]}
                   onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
                   rows={rows}
+                  maxLength={20000}
                   disabled={firmado || !!guardando}
                   className={`w-full px-4 py-3 rounded-lg border border-slate-200
                     font-body text-sm text-navy leading-relaxed resize-y bg-white transition-colors

@@ -255,6 +255,7 @@ class TestDiagnosticoAPI:
         with patch("diagnostico.views.DetectorTorax.cargar") as mock_cargar, \
              patch("diagnostico.gradcam.GeneradorGradCAM.calcular") as mock_calcular, \
              patch("diagnostico.gradcam.GeneradorGradCAM.get_centroide") as mock_centroide, \
+             patch("diagnostico.gradcam.GeneradorGradCAM.resumir_activacion") as mock_resumen, \
              patch("diagnostico.gradcam.GeneradorGradCAM.overlay_base64") as mock_overlay, \
              patch("diagnostico.gradcam.GeneradorGradCAM.overlay_solo_heatmap_base64") as mock_solo:
 
@@ -266,6 +267,12 @@ class TestDiagnosticoAPI:
             from types import SimpleNamespace
             mock_calcular.return_value = np.random.rand(512, 512).astype(np.float32)
             mock_centroide.return_value = {"x": 256, "y": 256}
+            mock_resumen.return_value = {
+                "disponible": True,
+                "descripcion": "La influencia se concentra en el tercio medio.",
+                "zonas_principales": [],
+                "cobertura_relativa_pct": 12.0,
+            }
             mock_overlay.return_value = "data:image/png;base64,mock"
             mock_solo.return_value = "data:image/png;base64,mock"
 
@@ -276,6 +283,7 @@ class TestDiagnosticoAPI:
             data = response.json()
             assert "overlay" in data
             assert "centroide" in data
+            assert data["resumen_activacion"]["disponible"] is True
             assert data["cache"] is False
 
             # Mismo estudio y patología: no debe volver a ejecutar Grad-CAM.

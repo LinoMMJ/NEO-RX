@@ -179,7 +179,7 @@ class RevokeTokensView(APIView):
             )
 
 
-RESET_CODE_LIFETIME = timedelta(minutes=10)
+RESET_CODE_LIFETIME = timedelta(minutes=settings.PASSWORD_RESET_CODE_MINUTES)
 RESET_MAX_ATTEMPTS = 5
 
 
@@ -224,7 +224,7 @@ class PasswordResetRequestView(APIView):
                 subject="Código de recuperación - Neo RX",
                 message=(f"Hola {user.get_full_name() or user.username},\n\n"
                          f"Tu código de recuperación es: {code}\n"
-                         "Vence en 10 minutos y solo puede usarse una vez.\n"
+                         f"Vence en {settings.PASSWORD_RESET_CODE_MINUTES} minutos y solo puede usarse una vez.\n"
                          "Si no solicitaste el cambio, ignora este correo.\n"),
                 from_email=settings.DEFAULT_FROM_EMAIL,
                 recipient_list=[user.email],

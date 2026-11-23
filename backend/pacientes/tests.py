@@ -3,6 +3,8 @@ Tests unitarios para app pacientes.
 """
 
 import pytest
+from datetime import date, timedelta
+from django.utils import timezone
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APIClient
@@ -105,6 +107,32 @@ class TestPacienteAPI:
         response = auth_client.post(url, data, format="json")
         assert response.status_code == status.HTTP_400_BAD_REQUEST
 
+    def test_fecha_nacimiento_acepta_100_pero_rechaza_mas_de_100(self, auth_client):
+        today = timezone.localdate()
+        exactly_100 = date(today.year - 100, today.month, today.day)
+        over_100 = date(today.year - 101, today.month, today.day)
+        base = {"nombres": "Edad", "apellidos": "Límite", "genero": "Otro"}
+
+        accepted = auth_client.post(reverse("paciente-list"), {
+            **base, "ci": "AGE-100", "fecha_nacimiento": exactly_100.isoformat(),
+        }, format="json")
+        rejected = auth_client.post(reverse("paciente-list"), {
+            **base, "ci": "AGE-101", "fecha_nacimiento": over_100.isoformat(),
+        }, format="json")
+
+        assert accepted.status_code == status.HTTP_201_CREATED
+        assert rejected.status_code == status.HTTP_400_BAD_REQUEST
+        assert "más de 100 años" in str(rejected.data["errors"]["fecha_nacimiento"][0])
+
+    def test_rechaza_fecha_futura_y_campos_personales_mal_formados(self, auth_client):
+        future = timezone.localdate() + timedelta(days=1)
+        response = auth_client.post(reverse("paciente-list"), {
+            "nombres": "1234", "apellidos": "Apellido<script>", "ci": "CI/INVALIDO",
+            "fecha_nacimiento": future.isoformat(), "genero": "M", "telefono": "12-AB",
+        }, format="json")
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert {"nombres", "apellidos", "ci", "fecha_nacimiento", "telefono"}.issubset(response.data["errors"])
+
     def test_search_paciente_by_ci(self, auth_client):
         Paciente.objects.create(
             nombres="Juan", apellidos="Pérez", ci="12345678",
@@ -170,6 +198,19 @@ class TestEstudioAPI:
         response = auth_client.post(url, data, format="json")
         assert response.status_code == status.HTTP_201_CREATED
         assert response.json()["paciente"] == paciente.id
+
+    def test_rechaza_fecha_de_estudio_futura_o_anterior_al_nacimiento(self, auth_client, paciente):
+        url = reverse("estudio-list")
+        common = {"paciente": paciente.id, "tipo_estudio": "Radiografía de tórax"}
+        future = auth_client.post(url, {
+            **common, "fecha": (timezone.localdate() + timedelta(days=1)).isoformat(),
+        }, format="json")
+        before_birth = auth_client.post(url, {
+            **common, "fecha": "1970-01-01",
+        }, format="json")
+        assert future.status_code == status.HTTP_400_BAD_REQUEST
+        assert before_birth.status_code == status.HTTP_400_BAD_REQUEST
+        assert "fecha" in future.data["errors"] and "fecha" in before_birth.data["errors"]
 
     def test_filter_estudios_by_paciente(self, auth_client, paciente):
         Estudio.objects.create(paciente=paciente, fecha="2024-01-15", tipo_estudio="Rx Tórax")

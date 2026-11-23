@@ -15,6 +15,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [resetOpen, setResetOpen] = useState(false)
+  const [resetNotice, setResetNotice] = useState('')
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -123,6 +124,11 @@ export default function LoginPage() {
               {error}
             </div>
           )}
+          {resetNotice && (
+            <div role="status" className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 font-body text-sm text-emerald-800">
+              {resetNotice}
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
@@ -133,6 +139,7 @@ export default function LoginPage() {
                 id="username"
                 type="text"
                 autoComplete="username"
+                maxLength={254}
                 value={form.username}
                 onChange={(e) => setForm(f => ({ ...f, username: e.target.value }))}
                 className="w-full px-4 py-3 rounded-xl border border-slate-200 font-body text-sm text-navy
@@ -152,6 +159,7 @@ export default function LoginPage() {
                   id="password"
                   type={showPass ? 'text' : 'password'}
                   autoComplete="current-password"
+                  maxLength={128}
                   value={form.password}
                   onChange={(e) => setForm(f => ({ ...f, password: e.target.value }))}
                   className="w-full px-4 py-3 pr-11 rounded-xl border border-slate-200 font-body text-sm text-navy
@@ -173,7 +181,7 @@ export default function LoginPage() {
 
             <div className="flex items-center justify-between gap-3 text-sm">
               <label className="flex items-center gap-2 min-h-11"><input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} />Recuérdame</label>
-              <button type="button" onClick={() => setResetOpen(true)} className="text-sky-800 underline underline-offset-4">¿Olvidaste tu contraseña?</button>
+              <button type="button" onClick={() => { setResetNotice(''); setResetOpen(true) }} className="text-sky-800 underline underline-offset-4">¿Olvidaste tu contraseña?</button>
             </div>
             <button
               type="submit"
@@ -196,7 +204,7 @@ export default function LoginPage() {
           </p>
         </motion.div>
       </div>
-      {resetOpen && <PasswordResetDialog onClose={() => setResetOpen(false)}/>}
+      {resetOpen && <PasswordResetDialog onClose={() => setResetOpen(false)} onSuccess={() => setResetNotice('Contraseña actualizada correctamente. Ya puedes iniciar sesión con tu nueva contraseña.')} />}
     </div>
   )
 }

@@ -62,6 +62,14 @@ FILE_UPLOAD_MAX_MEMORY_SIZE = 2 * 1024 * 1024
 FILE_UPLOAD_PERMISSIONS = 0o600
 FILE_UPLOAD_DIRECTORY_PERMISSIONS = 0o700
 
+# La varianza de Laplaciano depende del contraste y del equipo de adquisición.
+# Un corte fijo de 100 descartaba radiografías NIH válidas de bajo contraste
+# antes de que llegaran a la CNN. Sigue siendo configurable por despliegue y
+# conserva un valor conservador que bloquea desenfoques severos.
+BLUR_THRESHOLD = float(os.getenv("NEORX_BLUR_THRESHOLD", "50.0"))
+if not 0 < BLUR_THRESHOLD <= 10000:
+    raise ValueError("NEORX_BLUR_THRESHOLD debe ser mayor que 0 y menor o igual a 10000.")
+
 AUTH_USER_MODEL = "accounts.CustomUser"
 EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", "django.core.mail.backends.locmem.EmailBackend")
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "noreply@neorx.local")
@@ -525,3 +533,6 @@ EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True').lower() == 'true'
 EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
 EMAIL_TIMEOUT = 15
+PASSWORD_RESET_CODE_MINUTES = int(os.getenv('PASSWORD_RESET_CODE_MINUTES', '15'))
+if not 5 <= PASSWORD_RESET_CODE_MINUTES <= 30:
+    raise ValueError('PASSWORD_RESET_CODE_MINUTES debe estar entre 5 y 30 minutos.')

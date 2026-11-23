@@ -89,6 +89,10 @@ def test_recovery_email_code_and_email_login(api_client, medico_user, mailoutbox
     assert api_client.post('/api/password/reset/', {'email': medico_user.email.upper()}).status_code == 200
     assert len(mailoutbox) == 1
     body = mailoutbox[0].body
+    assert 'Vence en 15 minutos' in body
+    medico_user.refresh_from_db()
+    remaining = medico_user.password_reset_expires - timezone.now()
+    assert timedelta(minutes=14, seconds=50) <= remaining <= timedelta(minutes=15)
     code = re.search(r'código de recuperación es: (\d{6})', body).group(1)
     assert '#token=' not in body and code not in body.split('Si no solicitaste')[1]
     assert api_client.post('/api/password/reset/confirm/', {'email': medico_user.email, 'reset_proof': code, 'new_password': 'New-strong-password-552!'}).status_code == 400

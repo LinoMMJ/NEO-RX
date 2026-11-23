@@ -268,6 +268,7 @@ export default function EscaneoPage() {
                     value={observaciones}
                     onChange={(e) => setObservaciones(e.target.value)}
                     rows={2}
+                    maxLength={5000}
                     placeholder="Anotaciones clínicas adicionales…"
                     className="w-full px-3 py-2 rounded-lg border border-slate-200 font-body text-sm resize-none
                       focus:outline-none focus:ring-2 focus:ring-teal-med/40"

@@ -9,8 +9,9 @@
 | **Inicio** | Martes 25 de agosto de 2026 |
 | **Fin** | Viernes 20 de noviembre de 2026 |
 | **Duración total** | 13 semanas (91 días) |
-| **Fecha actual** | Lunes 8 de septiembre de 2026 (Semana 3) |
-| **Estado general** | **Core MVP funcionando** (Backend Django + Frontend React + CNN inference) |
+| **Fecha actual** | Martes 20 de octubre de 2026 (Semana 9) |
+| **Próxima presentación** | Miércoles 21 de octubre de 2026 |
+| **Estado general** | **Fase 3 lista para demostración y fases posteriores adelantadas** |
 
 ---
 
@@ -20,13 +21,13 @@
 |------|--------|--------|------------|
 | **Infra & Base** | ✅ Completado | 100% | Django, DB, Auth, Docker-ready |
 | **Core Clínico (Pacientes/Estudios/DICOM)** | ✅ Completado | 100% | CRUD + Upload + Validación |
-| **IA / CNN Inference** | ✅ Completado | 90% | torchxrayvision integrado, falta fine-tuning propio |
-| **Informes Clínicos** | ✅ Completado | 85% | Generación + Firmado, falta PDF/DICOM export |
-| **Frontend UI** | ✅ Completado | 90% | 6 páginas funcionales |
-| **Testing & Calidad** | ⏳ Pendiente | 10% | Solo tests vacíos |
-| **Gestión/Admin/Logging** | ⏳ Pendiente | 0% | Gap identificado en SDD |
-| **Despliegue/Entrega** | ⏳ Pendiente | 0% | Docker, CI/CD, docs |
-| **Fine-tuning CNN** | ⏳ Pendiente | 0% | NIH ChestX-ray14, RunPod A100, ResNet-50 |
+| **IA / CNN Inference** | ✅ Completado | 100% | Modelo focused5 integrado y Grad-CAM verificado |
+| **Informes Clínicos** | ✅ Completado | 100% | Generación, firma, PDF y DICOM SR probados |
+| **Frontend UI** | ✅ Completado | 95% | Flujos clínicos y administrativos funcionales |
+| **Testing & Calidad** | ✅ Completado para la tarea 23 | 100% | Playwright 11/11, Vitest 37/37 y Node 7/7; evidencia HTML visual |
+| **Gestión/Admin/Logging** | ✅ Completado | 90% | CRUD, actividad, auditoría y métricas disponibles |
+| **Despliegue/Entrega** | 🔄 En curso | 75% | Docker y scripts listos; falta ensayo y paquete final |
+| **Fine-tuning CNN** | 🔄 En curso | 85% | Entrenamiento focused5 concluido; falta evaluación final independiente |
 
 ---
 
@@ -89,14 +90,14 @@
 |---|------------------|------------|--------|
 | 3.1 | Wrapper `DetectorTorax` (Singleton) con torchxrayvision ResNet-50 | `diagnostico/services.py` | ✅ |
 | 3.2 | Preprocesamiento idéntico a xrv: CenterCrop 512 + Resize 512 + Normalize [-1024,1024] | `_preprocesar()` | ✅ |
-| 3.3 | Mapeo 18→14 patologías neumológicas (ES/EN) + orden por probabilidad | `PATOLOGIAS_NEUMOLOGIA` | ✅ |
+| 3.3 | Cinco categorías focused5 (ES/EN) y orden por puntuación | Metadatos del checkpoint | ✅ |
 | 3.4 | Modelo `ResultadoCNN` (OneToOne ImagenDICOM, JSON patologías, tiempo_inferencia) | `diagnostico/models.py` | ✅ |
 | 3.5 | Vista `ResultadoCNNView` + serializer (GET resultado por imagen) | `diagnostico/urls.py` | ✅ |
 | 3.6 | **Grad-CAM**: Heatmap overlay + centroide (layer4 ResNet) | `gradcam.py` + `GradCAMView` | ✅ |
-| 3.7 | Frontend: **ListaPatologias** (badges color: Alto/Moderado/Bajo/No sig.) | `ListaPatologias.jsx` | ✅ |
-| 3.8 | Frontend: **BarraFidelidad** (confianza visual por patología) | `BarraFidelidad.jsx` | ✅ |
-| 3.9 | Frontend: Integración heatmap Grad-CAM en visor | `VisorImagen.jsx` + overlay | ✅ Parcial |
-| 3.10 | Centralizar umbrales clínicos en backend (eliminar 5 duplicados frontend) | `niveles.py` + API devuelve niveles | ⏳ **PENDIENTE CRÍTICO** |
+| 3.7 | Frontend: **ListaPatologias** (señales según threshold y nivel visual devuelto por backend) | `ListaPatologias.jsx` | ✅ |
+| 3.8 | Frontend sin umbrales duplicados ni “confianza diagnóstica”; degradación neutral si falla la API | `ListaPatologias.jsx` | ✅ |
+| 3.9 | Frontend: Integración heatmap Grad-CAM en visor | `VisorImagen.jsx` + overlay | ✅ |
+| 3.10 | Centralizar niveles visuales en backend y mantener separados los thresholds del checkpoint | `niveles.py` + API unificada | ✅ |
 
 ---
 
@@ -112,8 +113,8 @@
 | 4.6 | Endpoint `PUT /api/informes/{id}/` (editar hallazgos/impresión/recomendaciones) | Editable solo en borrador | ✅ |
 | 4.7 | Endpoint `POST /api/informes/{id}/firmar/` (solo rol=medico, timestamp) | `firmar_informe_view` | ✅ |
 | 4.8 | Frontend: **InformePage** (editor rico + vista previa + botón firmar) | `InformePage.jsx` | ✅ |
-| 4.9 | **Export PDF**: xhtml2pdf / weasyprint (plantilla HTML → PDF clínico) | `export_pdf_view` | ⏳ **PENDIENTE** |
-| 4.10 | **Export DICOM SR**: pydicom Structured Report (Basic Text SR) | `export_dicom_sr_view` | ⏳ **PENDIENTE** |
+| 4.9 | **Export PDF**: documento clínico descargable | `DescargarInformePDFView` | ✅ |
+| 4.10 | **Export DICOM SR**: pydicom Structured Report | `DescargarInformeDICOMSRView` | ✅ |
 
 ---
 
@@ -121,14 +122,14 @@
 
 | # | Tarea Específica | Entregable | Estado |
 |---|------------------|------------|--------|
-| 5.1 | **Admin Users CRUD**: API `/api/admin/users/` (listar, crear, editar, desactivar, cambiar rol) | `accounts/admin_views.py` | ⏳ |
-| 5.2 | **Admin UI Frontend**: Página `AdminUsuariosPage` (tabla, modal, filtros por rol) | `AdminUsuariosPage.jsx` | ⏳ |
-| 5.3 | **Dashboard Operativo**: Métricas tiempo real (estudios/día, latencia p95, % completados) | `GET /api/metrics/operacionales/` | ⏳ |
-| 5.4 | Frontend: **DashboardPage** con gráficos (Recharts) + export CSV | `DashboardPage.jsx` + charts | ⏳ |
-| 5.5 | **Auditoría/Logging**: Middleware request_id + structured logging (JSON) + modelo `AuditLog` | `logging_config` + `AuditLog` | ⏳ |
-| 5.6 | **Encriptación campos sensibles**: `django-cryptography` en `Paciente.ci`, `ImagenDICOM.archivo_dicom` | Migración + campos encrypted | ⏳ |
-| 5.7 | **Rate limiting** API (django-ratelimit) + headers seguridad (HSTS, CSP) | `MIDDLEWARE` + settings | ⏳ |
-| 5.8 | **Backup strategy**: Script pg_dump + retention + restore test | `scripts/backup.sh` | ⏳ |
+| 5.1 | **Admin Users CRUD**: API `/api/admin/users/` | API administrativa | ✅ |
+| 5.2 | **Admin UI Frontend**: tabla, modal y filtros por rol | `AdminUsuariosPage.jsx` | ✅ |
+| 5.3 | **Dashboard Operativo**: métricas, latencia y completitud | `GET /api/metrics/operacionales/` | ✅ |
+| 5.4 | Frontend: tablero con gráficos y export CSV | `DashboardPage.jsx` + charts | 🔄 Métricas listas; faltan gráficos/CSV |
+| 5.5 | **Auditoría/Logging**: request_id, logging y `AuditLog` | Seguridad y actividad | ✅ |
+| 5.6 | **Protección de datos**: CI cifrado y entrega autenticada de imágenes | Campos + media privada | 🔄 Falta cifrado binario del volumen |
+| 5.7 | **Rate limiting** API + headers de seguridad | Middleware + settings | ✅ |
+| 5.8 | **Backup strategy**: pg_dump, retención y verificación | `scripts/backup.sh` | ✅ Script; falta ensayo de restauración |
 
 ---
 
@@ -136,13 +137,13 @@
 
 | # | Tarea Específica | Entregable | Estado |
 |---|------------------|------------|--------|
-| 6.1 | Tests unitarios Backend (pytest): Auth, Pacientes, Estudios, Diagnóstico, Informes | `backend/*/tests.py` > 80% coverage | ⏳ |
-| 6.2 | Tests unitarios Frontend (Vitest): Componentes, hooks, utils | `frontend/src/**/*.test.jsx` | ⏳ |
-| 6.3 | Tests integración API (DRF APITestCase): Flujos E2E completos | `tests/integration/` | ⏳ |
+| 6.1 | Tests Backend: Auth, Pacientes, Estudios, Diagnóstico, Informes y training | 163 pruebas pasan; falta medir cobertura | 🔄 |
+| 6.2 | Tests unitarios frontend: componentes, hooks, utils y sesión | 37 Vitest + 7 Node aprobados; contraste de 7 temas | ✅ |
+| 6.3 | Playwright funcional e integración: auth, RBAC, pacientes, auditoría, métricas, seguridad y flujo clínico | 11/11 aprobados; reporte HTML con 11 capturas | ✅ |
 | 6.4 | Test carga: Locust (100 users concurrentes, upload DICOM + inferencia) | `locustfile.py` + reporte | ⏳ |
-| 6.5 | Documentación API: **drf-spectacular** → Swagger UI `/api/schema/swagger/` | OpenAPI 3.0 completo | ⏳ |
-| 6.6 | Documentación técnica: README + Arquitectura (C4) + Decisiones (ADR) | `docs/` | ⏳ |
-| 6.7 | Dockerfile backend (multi-stage) + frontend (nginx) + docker-compose.prod.yml | `Dockerfile*`, `docker-compose.prod.yml` | ⏳ |
+| 6.5 | Documentación API: Swagger UI `/api/schema/swagger/` | Disponible; faltan esquemas de varios `APIView` | 🔄 |
+| 6.6 | Documentación técnica: README + decisiones y revisiones | `docs/` | 🔄 |
+| 6.7 | Dockerfiles + nginx + docker-compose.prod.yml | Despliegue reproducible | ✅ |
 | 6.8 | Variables producción (.env.prod) + secrets management | `.env.prod.example` | ⏳ |
 | 6.9 | **Ensayo defensa**: Demo E2E grabada (15 min) + Slides (10 min) | Video + PDF slides | ⏳ |
 | 6.10 | Entrega final: Repo tag `v1.0-defensa` + ZIP código + Docs + Video | Release GitHub + Drive | ⏳ |
@@ -154,15 +155,15 @@
 | # | Tarea Específica | Entregable | Estado |
 |---|------------------|------------|--------|
 | 7.1 | Descarga NIH ChestX-ray14 (112k imágenes) + metadatos CSV | `data/nih/` + `Data_Entry_2017.csv` | ⏳ |
-| 7.2 | Preprocesamiento: resize 512x512, normalización [-1024,1024], splits train/val/test (70/15/15) | `data/nih/processed/` + `splits.json` | ⏳ |
-| 7.3 | DataLoader optimizado (num_workers, pin_memory, mixed precision) | `training/dataloaders.py` | ⏳ |
-| 7.4 | Modelo: ResNet-50 torchxrayvision + head nueva 14 clases neumológicas | `training/model.py` | ⏳ |
-| 7.5 | Entrenamiento: head-only (epochs 1-3) → partial unfreeze layer3-4 (epochs 4-10) en RunPod A100 | `training/train.py` + checkpoints | ⏳ |
-| 7.6 | Callbacks: EarlyStopping, ReduceLROnPlateau, ModelCheckpoint, WandB/TensorBoard | `training/callbacks.py` | ⏳ |
-| 7.7 | Evaluación: AUC-ROC, sensibilidad, especificidad, F1 por patología + matriz confusión | `training/evaluate.py` + `metrics.json` | ⏳ |
+| 7.2 | Preprocesamiento 512x512, normalización y splits por paciente | Manifiestos focused5 | ✅ |
+| 7.3 | DataLoader optimizado y precisión mixta | `training/dataset.py` | ✅ |
+| 7.4 | ResNet-50 con cabeza de cinco categorías | `training/model.py` | ✅ |
+| 7.5 | Entrenamiento head-only + fine-tuning | Checkpoint focused5 | ✅ |
+| 7.6 | Early stopping, scheduler, checkpoints y TensorBoard | Pipeline de entrenamiento | ✅ |
+| 7.7 | Métricas por categoría y selección de thresholds | Validación lista; test final pendiente | 🔄 |
 | 7.8 | Comparativa baseline (preentrenado) vs fine-tuned en test set | `training/compare.py` + reporte | ⏳ |
-| 7.9 | Export checkpoint final `.pt` + integración en `DetectorTorax.cargar()` | `models/finetuned_resnet50_nih.pt` | ⏳ |
-| 7.10 | Dockerfile.training + scripts reproducibles + README.training.md | `Dockerfile.training`, `training/README.md` | ⏳ |
+| 7.9 | Export checkpoint final `.pt` + integración en `DetectorTorax.cargar()` | `neorx_focused5_resnet50.pt` | ✅ |
+| 7.10 | Dockerfile.training + scripts reproducibles + documentación | Pipeline reproducible | ✅ |
 
 ---
 
@@ -183,15 +184,17 @@ FASE 7:                                     ██ ██ ██
 
 ---
 
-## ✅ **TAREAS YA COMPLETADAS (HASTA HOY 8 SEP)**
+## ✅ **TAREAS YA COMPLETADAS (VERIFICADAS EL 20 OCT)**
 
 | Tarea | Completada | Notas |
 |-------|------------|-------|
 | 0.1 - 0.10 | ✅ | Base sólida |
 | 1.1 - 1.10 | ✅ | Pacientes/Estudios + UI |
 | 2.1 - 2.10 | ✅ | DICOM upload + validación + CNN async |
-| 3.1 - 3.9 | ✅ | CNN + Grad-CAM + UI resultados |
-| 4.1 - 4.8 | ✅ | Informes generables y firmables |
+| 3.1 - 3.10 | ✅ | Focused5 + thresholds + Grad-CAM + UI resultados |
+| 4.1 - 4.10 | ✅ | Informes, firma, PDF y DICOM SR |
+| 5.1 - 5.3 | ✅ | Administración de usuarios y métricas operativas |
+| 5.5 - 5.8 | ✅ | Auditoría, protección de CI, seguridad y backup |
 
 ---
 
@@ -199,14 +202,13 @@ FASE 7:                                     ██ ██ ██
 
 | Prioridad | Tarea | Esfuerzo | Riesgo |
 |-----------|-------|----------|--------|
-| **P0** | Centralizar umbrales clínicos (`niveles.py`) + API devuelve `Alto/Moderado/Bajo/No sig.` | 4h | **Inconsistencia clínica actual** (5 umbrales distintos en frontend) |
-| **P0** | Export PDF informes (xhtml2pdf/weasyprint) | 6h | **Entregable tangible esperado** |
-| **P1** | Admin Users CRUD + UI | 8h | Requisito grado "gestión" |
-| **P1** | Dashboard operativo métricas + gráficos | 8h | Requisito grado "monitoreo" |
-| **P1** | Encriptación CI + DICOM (HIPAA/LOPD) | 4h | Compliance médico |
-| **P2** | Tests (pytest + vitest) > 60% coverage | 16h | Calidad académica |
-| **P2** | Swagger/OpenAPI + docs técnicas | 4h | Presentación profesional |
-| **P2** | Docker compose producción + deploy guide | 6h | Reproducibilidad |
+| **P0** | Evaluación final sobre test + comparación con baseline | 6h | No afirmar desempeño clínico solo con validación |
+| **P0** | Preparar estudios y plan de contingencia para la demo | 2h | Evitar depender de carga o red durante la exposición |
+| **P1** | Completar esquemas OpenAPI de endpoints `APIView` | 4h | Swagger todavía omite operaciones |
+| **P1** | Dashboard con gráficos y exportación CSV | 6h | Visualización operativa incompleta |
+| **P1** | Medir cobertura y completar rutas sin pruebas | 8h | Falta porcentaje formal de cobertura |
+| **P2** | Ensayo de defensa, capturas y video | 6h | Entrega final y contingencia |
+| **P2** | Prueba de carga y restauración de backup | 6h | Evidencia operativa pendiente |
 
 ---
 
@@ -215,11 +217,11 @@ FASE 7:                                     ██ ██ ██
 | Hito | Fecha Límite | % Proyecto | Estado |
 |------|--------------|------------|--------|
 | **MVP Core Funcional** | 21 Sep (Semana 4) | 40% | ✅ **YA ALCANZADO** |
-| **IA + Diagnóstico Completo** | 12 Oct (Semana 7) | 55% | ✅ **YA ALCANZADO** |
-| **Informes + Export** | 2 Nov (Semana 10) | 65% | 🔄 En curso (falta PDF/DICOM) |
-| **Gestión/Admin/Seguridad** | 16 Nov (Semana 12) | 75% | ⏳ Por iniciar |
-| **Testing + Docs + Deploy** | 20 Nov (Semana 13) | 85% | ⏳ Por iniciar |
-| **Fine-tuning CNN propio** | 11 Dic (Semana 16) | 100% | ⏳ Por iniciar |
+| **IA + Diagnóstico Completo** | 12 Oct (Semana 7) | 55% | ✅ **ALCANZADO** |
+| **Informes + Export** | 2 Nov (Semana 10) | 65% | ✅ **ADELANTADO** |
+| **Gestión/Admin/Seguridad** | 16 Nov (Semana 12) | 75% | 🔄 90% adelantado |
+| **Testing + Docs + Deploy** | 20 Nov (Semana 13) | 85% | 🔄 75% adelantado |
+| **Fine-tuning focused5** | 11 Dic (Semana 16) | 100% | 🔄 Integrado; falta evaluación final |
 
 ---
 
@@ -229,34 +231,36 @@ FASE 7:                                     ██ ██ ██
 |-----|----------|---------------|
 | **ADR-001** | Django + DRF (no Flask) | Admin auto, ORM maduro, auth robusto, migraciones |
 | **ADR-002** | JWT Stateless (SimpleJWT) + RBAC en token | Escalable, sin sesión servidor, frontend simple |
-| **ADR-003** | torchxrayvision preentrenado (no modelo propio aún) | Time-to-demo, baseline clínico validado, fine-tuning post-entrega |
+| **ADR-003** | Baseline torchxrayvision conservado como referencia | Permite comparar el modelo propio con una línea base reproducible |
 | **ADR-004** | Celery + Redis para inferencia async | No bloquea request HTTP, escalable a GPU workers |
 | **ADR-005** | SQLite dev / PostgreSQL prod (Docker) | Paridad dev-prod, cero config local |
 | **ADR-006** | Centralizar umbrales en backend (Single Source of Truth) | Elimina 5 duplicados frontend, consistencia clínica |
 | **ADR-007** | React 19 + Vite + Tailwind 4 (no TypeScript aún) | Velocidad dev, bundle pequeño, migración TS futura |
-| **ADR-008** | Fine-tuning ResNet-50 en NIH ChestX-ray14 (head + partial unfreeze) | Modelo propio validado en datos clínicos, mejor que baseline genérico |
+| **ADR-008** | Fine-tuning ResNet-50 para cinco categorías NIH | Reduce ambigüedad; la mejora frente al baseline aún debe medirse en test |
 
 ---
 
-## 📝 **PRÓXIMOS PASOS INMEDIATOS (ESTA SEMANA 8-14 SEP)**
+## 📝 **PRÓXIMOS PASOS INMEDIATOS (20-26 OCT)**
 
-1. **Lunes 8** → Centralizar umbrales clínicos (`niveles.py`) + actualizar frontend
-2. **Martes 9** → Export PDF informes (weasyprint) + test visual
-3. **Miércoles 10** → Admin Users CRUD API + UI básica
-4. **Jueves 11** → Dashboard métricas + Recharts
-5. **Viernes 12** → Encriptación CI + Logging estructurado
-6. **Sáb-Dom** → Tests pytest (mínimo happy paths) + Swagger
+1. **Martes 20** → Integrar y verificar checkpoint focused5; ejecutar suites completas
+2. **Miércoles 21** → Presentar Fase 3 con demo preparada y estudio de respaldo
+3. **Jueves 22** → Evaluar checkpoint sobre test y comparar con baseline
+4. **Viernes 23** → Completar esquemas OpenAPI pendientes
+5. **Sábado 24** → Añadir gráficos y exportación CSV al tablero
+6. **Domingo 25** → Medir cobertura y preparar evidencias de la siguiente entrega
 
 ---
 
 ## 🧠 **PRÓXIMOS PASOS FINE-TUNING (SEMANA 14-16, NOV 23 - DIC 11)**
 
-1. **Semana 14** → Descarga NIH + preprocesamiento + DataLoader + modelo head-only
-2. **Semana 15** → Entrenamiento RunPod A100 (head 3 epochs → unfreeze layer3-4 7 epochs)
-3. **Semana 16** → Evaluación métricas + comparativa baseline vs fine-tuned + integración + docs
+1. **Completado anticipadamente** → Preparación, splits, DataLoader y entrenamiento focused5
+2. **Siguiente** → Evaluación final en test, análisis por clase y por proyección
+3. **Cierre** → Comparativa baseline, informe metodológico y evidencia reproducible
 
 ---
 
-**Documento generado:** 8 de septiembre de 2026  
-**Versión:** 1.1 — Agregada Fase 7 Fine-tuning CNN  
+**Documento actualizado:** 20 de octubre de 2026
+
+**Versión:** 1.2 — Estado verificado para la presentación del 21 de octubre
+
 **Responsable:** [Tu Nombre] — Proyecto de Grado Neo RX

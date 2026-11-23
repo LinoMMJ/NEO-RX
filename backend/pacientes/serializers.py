@@ -1,13 +1,17 @@
 from rest_framework import serializers
+from django.utils import timezone
 from .models import Paciente, Estudio
-from neorx.validation import clean_plain_text
+from neorx.validation import (
+    clean_patient_identifier, clean_person_name, clean_phone,
+    clean_plain_text, validate_birth_date,
+)
 
 
 class PacienteSerializer(serializers.ModelSerializer):
     ci = serializers.CharField(max_length=20)
 
     def validate_ci(self, value):
-        value = clean_plain_text(value, max_length=20, field_name="identificador")
+        value = clean_patient_identifier(value)
         from neorx.encryption import ci_digest
         qs = Paciente.objects.filter(ci_search_hash=ci_digest(value))
         if self.instance:
@@ -17,13 +21,16 @@ class PacienteSerializer(serializers.ModelSerializer):
         return value
 
     def validate_nombres(self, value):
-        return clean_plain_text(value, max_length=100, field_name="nombres")
+        return clean_person_name(value, max_length=100, field_name="nombres")
 
     def validate_apellidos(self, value):
-        return clean_plain_text(value, max_length=100, field_name="apellidos")
+        return clean_person_name(value, max_length=100, field_name="apellidos")
 
     def validate_telefono(self, value):
-        return clean_plain_text(value, max_length=20, field_name="teléfono")
+        return clean_phone(value)
+
+    def validate_fecha_nacimiento(self, value):
+        return validate_birth_date(value)
 
     class Meta:
         model = Paciente
@@ -50,10 +57,19 @@ class EstudioSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Un estudio con informe firmado no puede modificarse.")
         if self.instance and attrs.get("paciente", self.instance.paciente) != self.instance.paciente:
             raise serializers.ValidationError({"paciente": "No se puede reasignar el paciente de un estudio existente."})
+        study_date = attrs.get("fecha", self.instance.fecha if self.instance else None)
+        patient = attrs.get("paciente", self.instance.paciente if self.instance else None)
+        if study_date and study_date > timezone.localdate():
+            raise serializers.ValidationError({"fecha": "La fecha del estudio no puede ser futura."})
+        if study_date and patient and study_date < patient.fecha_nacimiento:
+            raise serializers.ValidationError({"fecha": "La fecha del estudio no puede ser anterior al nacimiento del paciente."})
         return attrs
 
     def validate_tipo_estudio(self, value):
-        return clean_plain_text(value, max_length=200, field_name="tipo de estudio")
+        value = clean_plain_text(value, max_length=200, field_name="tipo de estudio")
+        if not value:
+            raise serializers.ValidationError("El tipo de estudio es obligatorio.")
+        return value
 
     def validate_observaciones(self, value):
         return clean_plain_text(

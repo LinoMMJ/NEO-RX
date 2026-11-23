@@ -116,8 +116,8 @@ class GradCAMView(APIView):
             revision = str(os.stat(checkpoint).st_mtime_ns) if checkpoint != "baseline" else os.environ.get("NEORX_BASELINE_WEIGHTS", "baseline")
         except OSError:
             revision = checkpoint
-        # v5: visualización regional suavizada, sin punto ni círculo de centroide.
-        raw = f"gradcam-v5-regional:{imagen.pk}:{imagen.archivo_dicom.name}:{pathology_en}:{revision}:{DetectorTorax._finetuned_input_size()}"
+        # v6 añade un resumen cuantitativo de sectores a la respuesta cacheada.
+        raw = f"gradcam-v6-regional-summary:{imagen.pk}:{imagen.archivo_dicom.name}:{pathology_en}:{revision}:{DetectorTorax._finetuned_input_size()}"
         return "gradcam:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     def get(self, request):
@@ -208,6 +208,7 @@ class GradCAMView(APIView):
                     return Response({**cached, "cache": True})
                 cam = GeneradorGradCAM.calcular(modelo, tensor, indice_clase)
                 centroide = GeneradorGradCAM.get_centroide(cam)
+                resumen_activacion = GeneradorGradCAM.resumir_activacion(cam)
                 overlay = GeneradorGradCAM.overlay_base64(modelo, tensor, indice_clase, arr, cam=cam)
                 solo_calor = GeneradorGradCAM.overlay_solo_heatmap_base64(
                     modelo, tensor, indice_clase, cam=cam
@@ -220,6 +221,7 @@ class GradCAMView(APIView):
                 "patologia": pathology_en,
                 "activacion_maxima": round(float(cam.max()), 4),
                 "centroide": centroide,
+                "resumen_activacion": resumen_activacion,
                 "tipo_visualizacion": "gradcam_regional_suavizado",
                 "cache": False,
                 "tiempo_generacion_ms": round((time.perf_counter() - started) * 1000),

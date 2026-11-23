@@ -22,15 +22,15 @@ from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "backend"
-SOURCE = ROOT / "muestras_radiografias_demo"
-OUTPUT = ROOT / "muestras_presentacion_preentrenado"
+SOURCE = ROOT / "muestras_presentacion_preentrenado"
+OUTPUT = ROOT / "tmp" / "verificacion_presentacion_preentrenado"
 
 CASES = (
-    ("01_derrame_pleural__00010834_000.png", "derrame_pleural", None),
-    ("02_masa_pulmonar__00009671_004.png", "categoria_tumoral", "tumoral"),
-    ("04_neumotorax__00027092_004.png", "categoria_pleural", "pleural"),
-    ("10_infiltrado__00001381_003.png", "categoria_infecciosa", "infecciosa"),
-    ("08_fibrosis__00004409_001.png", "categoria_intersticial", "intersticial"),
+    ("01_derrame_pleural__00008777_001.png", "derrame_pleural", None),
+    ("02_categoria_tumoral__00006832_014.png", "categoria_tumoral", "tumoral"),
+    ("03_categoria_pleural__00008334_000.png", "categoria_pleural", "pleural"),
+    ("04_categoria_infecciosa__00011366_002.png", "categoria_infecciosa", "infecciosa"),
+    ("05_categoria_intersticial__00004747_000.png", "categoria_intersticial", "intersticial"),
 )
 
 

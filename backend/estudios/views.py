@@ -170,6 +170,12 @@ class UploadDICOMView(APIView):
             allow_newlines=True,
         )
 
+        if registro_sin_ia and not tipo_solicitado:
+            return Response(
+                {"error": "Debe especificar el tipo de estudio que se archivará."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         if not archivo or (not estudio_id and not paciente_id):
             return Response(
                 {"error": "Se requiere un archivo y un paciente o estudio válido."},

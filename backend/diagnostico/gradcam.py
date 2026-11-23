@@ -107,6 +107,80 @@ class GeneradorGradCAM:
                 return {"x": int(M["m10"] / M["m00"]), "y": int(M["m01"] / M["m00"])}
         return None
 
+    @staticmethod
+    def resumir_activacion(cam_np):
+        """Describe sectores de influencia sin convertir Grad-CAM en una lesión.
+
+        Las coordenadas se expresan respecto a la imagen mostrada, no respecto
+        al lado anatómico del paciente. El resumen usa únicamente el mapa
+        cuantitativo; no infiere signos radiológicos ni bordes de una lesión.
+        """
+        cam = np.asarray(cam_np, dtype=np.float32)
+        if cam.ndim != 2 or not np.isfinite(cam).all() or (cam < 0).any():
+            raise ValueError("El mapa de activación debe ser una matriz 2D finita y no negativa.")
+        maximum = float(cam.max())
+        total = float(cam.sum())
+        if maximum <= 1e-8 or total <= 1e-8:
+            return {
+                "disponible": False,
+                "descripcion": "El mapa no presenta activación suficiente para localizar una zona predominante.",
+                "zonas_principales": [],
+                "cobertura_relativa_pct": 0.0,
+            }
+
+        height, width = cam.shape
+        yy, xx = np.indices(cam.shape, dtype=np.float32)
+        center_x = float((xx * cam).sum() / total) / max(width - 1, 1)
+        center_y = float((yy * cam).sum() / total) / max(height - 1, 1)
+
+        def horizontal(value):
+            return "lado izquierdo de la imagen" if value < 1 / 3 else (
+                "zona central de la imagen" if value < 2 / 3 else "lado derecho de la imagen"
+            )
+
+        def vertical(value):
+            return "tercio superior" if value < 1 / 3 else (
+                "tercio medio" if value < 2 / 3 else "tercio inferior"
+            )
+
+        vertical_names = ("tercio superior", "tercio medio", "tercio inferior")
+        horizontal_names = ("lado izquierdo", "zona central", "lado derecho")
+        regions = []
+        for row, y_indices in enumerate(np.array_split(np.arange(height), 3)):
+            for col, x_indices in enumerate(np.array_split(np.arange(width), 3)):
+                value = float(cam[np.ix_(y_indices, x_indices)].sum()) / total
+                regions.append({
+                    "zona": f"{vertical_names[row]}, {horizontal_names[col]}",
+                    "contribucion_pct": round(value * 100, 1),
+                })
+        regions.sort(key=lambda item: item["contribucion_pct"], reverse=True)
+        principal = [item for item in regions[:3] if item["contribucion_pct"] >= 10.0]
+
+        positive = cam[cam > maximum * 0.01]
+        cutoff = max(maximum * 0.55, float(np.percentile(positive, 75)))
+        coverage = float(np.count_nonzero(cam >= cutoff)) / cam.size * 100
+        area_text = ", seguida de ".join(
+            f"{item['zona']} ({item['contribucion_pct']:.1f}% de la activación)"
+            for item in principal[:2]
+        )
+        description = (
+            f"La influencia se concentra alrededor del {vertical(center_y)} y del {horizontal(center_x)}."
+        )
+        if area_text:
+            description += f" Por sectores, predomina en {area_text}."
+
+        return {
+            "disponible": True,
+            "descripcion": description,
+            "centro_ponderado": {
+                "x_pct": round(center_x * 100, 1),
+                "y_pct": round(center_y * 100, 1),
+            },
+            "zonas_principales": principal,
+            "cobertura_relativa_pct": round(coverage, 1),
+            "referencia_espacial": "sectores de la imagen mostrada; no lateralidad anatómica del paciente",
+        }
+
     @classmethod
     def overlay_base64(cls, modelo, tensor, indice_clase, arr_original_2d, cam=None):
         """

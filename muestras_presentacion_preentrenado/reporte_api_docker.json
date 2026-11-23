@@ -1,0 +1,153 @@
+{
+  "fecha": "2026-11-10",
+  "api": "http://localhost:8080",
+  "patient_id": 37,
+  "casos": [
+    {
+      "archivo": "01_derrame_pleural__00008777_001.png",
+      "http_upload": 202,
+      "estudio_id": 63,
+      "imagen_id": 63,
+      "decision": {
+        "estado": "hallazgos_prioritarios",
+        "titulo": "Señal prioritaria: derrame pleural",
+        "mensaje": "El modelo preentrenado superó su punto operativo para derrame pleural. La puntuación requiere confirmación profesional y no equivale a certeza diagnóstica.",
+        "hallazgos_principales": [
+          "Derrame pleural"
+        ]
+      },
+      "categoria": {
+        "clave": null,
+        "estado": "no_concluyente",
+        "nombre": "No concluyente",
+        "mensaje": "El modelo preentrenado superó su punto operativo para derrame pleural. La puntuación requiere confirmación profesional y no equivale a certeza diagnóstica.",
+        "enfermedades": []
+      },
+      "modelo": "resnet50-res512-all",
+      "tiempo_inferencia_seg": 11.028,
+      "gradcam": {
+        "patologia": "Effusion",
+        "tipo_visualizacion": "gradcam_regional_suavizado",
+        "cache": false,
+        "tiempo_generacion_ms": 25732
+      },
+      "tiempo_total_seg": 66.187
+    },
+    {
+      "archivo": "02_categoria_tumoral__00006832_014.png",
+      "http_upload": 202,
+      "estudio_id": 64,
+      "imagen_id": 64,
+      "decision": {
+        "estado": "orientacion_categoria",
+        "titulo": "Orientación por categoría: Tumoral",
+        "mensaje": "No se mostró derrame pleural. La señal restante se resume únicamente como categoría y requiere revisión profesional.",
+        "hallazgos_principales": []
+      },
+      "categoria": {
+        "clave": "tumoral",
+        "estado": "seleccionada",
+        "nombre": "Tumoral",
+        "mensaje": "No se mostró derrame pleural. La señal restante se resume únicamente como categoría y requiere revisión profesional.",
+        "enfermedades": [],
+        "puntuacion_modelo": 0.9971888661384583
+      },
+      "modelo": "resnet50-res512-all",
+      "tiempo_inferencia_seg": 10.328,
+      "gradcam": {
+        "patologia": "Mass",
+        "tipo_visualizacion": "gradcam_regional_suavizado",
+        "cache": false,
+        "tiempo_generacion_ms": 28909
+      },
+      "tiempo_total_seg": 41.395
+    },
+    {
+      "archivo": "03_categoria_pleural__00008334_000.png",
+      "http_upload": 202,
+      "estudio_id": 65,
+      "imagen_id": 65,
+      "decision": {
+        "estado": "orientacion_categoria",
+        "titulo": "Orientación por categoría: Pleural",
+        "mensaje": "No se mostró derrame pleural. La señal restante se resume únicamente como categoría y requiere revisión profesional.",
+        "hallazgos_principales": []
+      },
+      "categoria": {
+        "clave": "pleural",
+        "estado": "seleccionada",
+        "nombre": "Pleural",
+        "mensaje": "No se mostró derrame pleural. La señal restante se resume únicamente como categoría y requiere revisión profesional.",
+        "enfermedades": [],
+        "puntuacion_modelo": 0.6015212535858154
+      },
+      "modelo": "resnet50-res512-all",
+      "tiempo_inferencia_seg": 11.133,
+      "gradcam": {
+        "patologia": "Pneumothorax",
+        "tipo_visualizacion": "gradcam_regional_suavizado",
+        "cache": false,
+        "tiempo_generacion_ms": 26850
+      },
+      "tiempo_total_seg": 39.369
+    },
+    {
+      "archivo": "04_categoria_infecciosa__00011366_002.png",
+      "http_upload": 202,
+      "estudio_id": 66,
+      "imagen_id": 66,
+      "decision": {
+        "estado": "orientacion_categoria",
+        "titulo": "Orientación por categoría: Infecciosa",
+        "mensaje": "No se mostró derrame pleural. La señal restante se resume únicamente como categoría y requiere revisión profesional.",
+        "hallazgos_principales": []
+      },
+      "categoria": {
+        "clave": "infecciosa",
+        "estado": "seleccionada",
+        "nombre": "Infecciosa",
+        "mensaje": "No se mostró derrame pleural. La señal restante se resume únicamente como categoría y requiere revisión profesional.",
+        "enfermedades": [],
+        "puntuacion_modelo": 0.5476444363594055
+      },
+      "modelo": "resnet50-res512-all",
+      "tiempo_inferencia_seg": 10.971,
+      "gradcam": {
+        "patologia": "Infiltration",
+        "tipo_visualizacion": "gradcam_regional_suavizado",
+        "cache": false,
+        "tiempo_generacion_ms": 24974
+      },
+      "tiempo_total_seg": 64.894
+    },
+    {
+      "archivo": "05_categoria_intersticial__00004747_000.png",
+      "http_upload": 202,
+      "estudio_id": 67,
+      "imagen_id": 67,
+      "decision": {
+        "estado": "orientacion_categoria",
+        "titulo": "Orientación por categoría: Intersticial",
+        "mensaje": "No se mostró derrame pleural. La señal restante se resume únicamente como categoría y requiere revisión profesional.",
+        "hallazgos_principales": []
+      },
+      "categoria": {
+        "clave": "intersticial",
+        "estado": "seleccionada",
+        "nombre": "Intersticial",
+        "mensaje": "No se mostró derrame pleural. La señal restante se resume únicamente como categoría y requiere revisión profesional.",
+        "enfermedades": [],
+        "puntuacion_modelo": 0.6456021070480347
+      },
+      "modelo": "resnet50-res512-all",
+      "tiempo_inferencia_seg": 11.438,
+      "gradcam": {
+        "patologia": "Fibrosis",
+        "tipo_visualizacion": "gradcam_regional_suavizado",
+        "cache": false,
+        "tiempo_generacion_ms": 26754
+      },
+      "tiempo_total_seg": 39.319
+    }
+  ]
+}

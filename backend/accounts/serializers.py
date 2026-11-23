@@ -76,7 +76,7 @@ class SessionTokenRefreshSerializer(TokenRefreshSerializer):
 
 
 class CustomUserSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True, required=False)
+    password = serializers.CharField(write_only=True, required=False, min_length=8, max_length=128)
 
     def validate_email(self, value):
         value = value.strip().casefold()

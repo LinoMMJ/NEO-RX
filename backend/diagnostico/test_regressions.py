@@ -11,6 +11,23 @@ from unittest.mock import patch
 from diagnostico.gradcam import GeneradorGradCAM
 
 
+def test_gradcam_activation_summary_describes_image_sectors():
+    cam = np.zeros((12, 12), dtype=np.float32)
+    cam[:4, 8:] = 1.0
+    summary = GeneradorGradCAM.resumir_activacion(cam)
+    assert summary['disponible'] is True
+    assert 'tercio superior' in summary['descripcion']
+    assert 'lado derecho de la imagen' in summary['descripcion']
+    assert summary['zonas_principales'][0]['zona'] == 'tercio superior, lado derecho'
+    assert summary['referencia_espacial'].startswith('sectores de la imagen')
+
+
+def test_gradcam_activation_summary_abstains_for_empty_map():
+    summary = GeneradorGradCAM.resumir_activacion(np.zeros((8, 8), dtype=np.float32))
+    assert summary['disponible'] is False
+    assert summary['zonas_principales'] == []
+
+
 def test_gradcam_visual_is_regional_and_has_no_centroid_marker():
     """El render amplía suavemente la zona, sin dibujar círculos artificiales."""
     cam = np.zeros((512, 512), dtype=np.float32)

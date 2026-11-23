@@ -8,6 +8,7 @@ import Spinner from '../components/ui/Spinner'
 import { useFilters, useResource } from '../hooks/useWorkspace'
 import { Filter, ResetFilters, Pagination } from '../components/ui/WorkspaceUI'
 import { Link } from 'react-router-dom'
+import { patientBirthDateBounds, validatePatient } from '../utils/patientValidation'
 const empty = { nombres: '', apellidos: '', ci: '', fecha_nacimiento: '', genero: 'M', telefono: '' }
 const fields = [['nombres', 'Nombres', 'text', 100], ['apellidos', 'Apellidos', 'text', 100], ['ci', 'CI', 'text', 20], ['fecha_nacimiento', 'Fecha de nacimiento', 'date'], ['telefono', 'Teléfono', 'tel', 20]]
 export default function PacientesPage() {
@@ -22,6 +23,7 @@ export default function PacientesPage() {
   const formRef = useRef(null), createRef = useRef(null)
   const {data, loading, error: listError} = useResource('/pacientes/', filters, revision)
   const patients = data?.results || [], total = data?.count ?? 0
+  const birthDateBounds = patientBirthDateBounds()
   useEffect(() => { if (showForm) { formRef.current?.scrollIntoView({ behavior: 'auto', block: 'start' }); formRef.current?.querySelector('input')?.focus() } }, [showForm, editing])
   useEffect(() => {
     if (filters.accion !== 'nuevo' || !canEdit) return
@@ -34,7 +36,14 @@ export default function PacientesPage() {
   }
   function close() { setShowForm(false); createRef.current?.focus() }
   async function submit(event) {
-    event.preventDefault(); setBusy(true); setError(''); setErrors({})
+    event.preventDefault(); setError('')
+    const clientErrors = validatePatient(form)
+    setErrors(clientErrors)
+    if (Object.keys(clientErrors).length) {
+      document.getElementById(`patient-${Object.keys(clientErrors)[0]}`)?.focus()
+      return
+    }
+    setBusy(true)
     try {
       if (editing) await updatePaciente(editing.id, form)
       else await createPaciente(form)
@@ -62,10 +71,10 @@ export default function PacientesPage() {
         <div className="grid sm:grid-cols-2 gap-4">
           {fields.map(([key, label, type, maxLength]) => <div key={key}>
             <label htmlFor={`patient-${key}`} className="block text-sm font-semibold text-navy mb-1">{label}{key !== 'telefono' && ' *'}</label>
-            <input id={`patient-${key}`} type={type} maxLength={maxLength} max={type === 'date' ? new Date().toISOString().slice(0, 10) : undefined} value={form[key]} onChange={e => setForm(v => ({ ...v, [key]: e.target.value }))} className="input w-full" required={key !== 'telefono'} aria-invalid={!!errors[key]} aria-describedby={errors[key] ? `error-${key}` : undefined} />
+            <input id={`patient-${key}`} type={type} maxLength={maxLength} min={type === 'date' ? birthDateBounds.min : undefined} max={type === 'date' ? birthDateBounds.max : undefined} autoComplete={key === 'nombres' ? 'given-name' : key === 'apellidos' ? 'family-name' : key === 'telefono' ? 'tel' : 'off'} value={form[key]} onChange={e => setForm(v => ({ ...v, [key]: e.target.value }))} className="input w-full" required={key !== 'telefono'} aria-invalid={!!errors[key]} aria-describedby={errors[key] ? `error-${key}` : undefined} />
             {errors[key] && <p id={`error-${key}`} className="text-red-700 text-sm mt-1">{String(errors[key])}</p>}
           </div>)}
-          <div><label htmlFor="patient-genero" className="block text-sm font-semibold text-navy mb-1">Género *</label><select id="patient-genero" value={form.genero} onChange={e => setForm(v => ({ ...v, genero: e.target.value }))} className="input w-full"><option value="M">Masculino</option><option value="F">Femenino</option><option value="Otro">Otro</option></select></div>
+          <div><label htmlFor="patient-genero" className="block text-sm font-semibold text-navy mb-1">Género *</label><select id="patient-genero" value={form.genero} onChange={e => setForm(v => ({ ...v, genero: e.target.value }))} className="input w-full" aria-invalid={!!errors.genero} aria-describedby={errors.genero ? 'error-genero' : undefined}><option value="M">Masculino</option><option value="F">Femenino</option><option value="Otro">Otro</option></select>{errors.genero && <p id="error-genero" className="text-red-700 text-sm mt-1">{String(errors.genero)}</p>}</div>
         </div>
         <div className="flex gap-3 justify-end"><button type="button" className="btn-secondary min-h-11" onClick={close} disabled={busy}>Cancelar</button><button className="btn-primary min-h-11" disabled={busy}>{busy ? 'Guardando…' : editing ? 'Actualizar paciente' : 'Registrar paciente'}</button></div>
       </form>

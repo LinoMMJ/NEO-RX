@@ -30,8 +30,15 @@ function TechnicalRow({ row }) {
   )
 }
 
+function categoryModelScore(categoria) {
+  const raw = categoria?.puntuacion_modelo ?? categoria?.puntuacion_tecnica ?? categoria?.puntuacion
+  const score = Number(raw)
+  return Number.isFinite(score) && score >= 0 && score <= 1 ? score : null
+}
+
 function PrioritizedResult({ enfoque, decision, categoria }) {
   const primary = enfoque.estado === 'hallazgos_prioritarios'
+  const categoryScore = categoryModelScore(categoria)
   return <section className="rounded-xl border border-slate-200 bg-white p-5" aria-label="Análisis prioritario y orientación por categorías">
     <h3 className="font-heading text-base font-bold text-navy">Conclusión asistida</h3>
     <div role="status" className="mt-3 text-sm leading-relaxed text-slate-700">
@@ -46,7 +53,9 @@ function PrioritizedResult({ enfoque, decision, categoria }) {
     </ul>}
     {!primary && categoria?.estado === 'seleccionada' && <div className="mt-4 rounded-xl border border-teal-med/30 bg-teal-med/5 p-3" aria-label="Categoría orientativa">
       <p className="text-lg font-semibold text-navy">{categoria.nombre}</p>
-      {Number.isFinite(Number(categoria.puntuacion_tecnica)) && <p className="mt-1 text-sm text-slate-700">Puntuación técnica: {formatModelScore(categoria.puntuacion_tecnica)}</p>}
+      {categoryScore !== null && <p className="mt-1 text-sm text-slate-700" aria-label={`Puntuación del modelo para categoría ${categoria.nombre}`}>
+        Puntuación del modelo: <span className="font-mono font-semibold tabular-nums">{formatModelScore(categoryScore)}</span>
+      </p>}
     </div>}
     <p className="mt-4 text-sm leading-relaxed text-slate-600">
       Primero se evalúa derrame pleural. Si no alcanza el criterio, se consulta una sola orientación por categorías.
@@ -64,6 +73,7 @@ export default function ListaPatologias({ patologias, hallazgos = [], decision =
     nombre: 'No concluyente',
     mensaje: 'Este resultado se generó antes de incorporar la clasificación por categorías. Debe reprocesarse con un checkpoint categorial validado.',
   }
+  const categoryScore = categoryModelScore(categoryStatus)
   const effectiveDecision = decision?.estado ? decision : (
     !rows.length
       ? { estado: 'indeterminado', titulo: 'Sin resultado disponible', mensaje: 'No existen puntuaciones técnicas para interpretar.' }
@@ -88,6 +98,9 @@ export default function ListaPatologias({ patologias, hallazgos = [], decision =
         <div className="mt-4 rounded-xl border border-teal-med/25 bg-teal-med/5 p-4" aria-label="Categoría principal">
           <p className="text-xs font-semibold uppercase tracking-wide text-teal-dark">Categoría seleccionada</p>
           <p className="mt-1 font-heading text-lg font-bold text-navy">{categoryStatus.nombre}</p>
+          {categoryScore !== null && <p className="mt-1 text-sm text-slate-700" aria-label={`Puntuación del modelo para categoría ${categoryStatus.nombre}`}>
+            Puntuación del modelo: <span className="font-mono font-semibold tabular-nums">{formatModelScore(categoryScore)}</span>
+          </p>}
           <p className="mt-1 text-xs leading-relaxed text-slate-600">
             Se muestran únicamente las señales incluidas en esta categoría.
           </p>

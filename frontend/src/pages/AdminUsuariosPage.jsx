@@ -329,24 +329,24 @@ export default function AdminUsuariosPage() {
               <div className="grid sm:grid-cols-2 gap-4">
                 <div>
                   <label htmlFor="user-username" className="label">Usuario *</label>
-                  <input id="user-username" name="username" autoComplete="username" aria-invalid={!!formErrors.username} aria-describedby={formErrors.username ? "user-error-username" : undefined} type="text" value={formData.username} onChange={e => setFormData({...formData, username: e.target.value})} className="input mt-1" required />
+                  <input id="user-username" name="username" autoComplete="username" maxLength={150} aria-invalid={!!formErrors.username} aria-describedby={formErrors.username ? "user-error-username" : undefined} type="text" value={formData.username} onChange={e => setFormData({...formData, username: e.target.value})} className="input mt-1" required />
                   {formErrors.username && <p id="user-error-username" className="text-red-700 text-sm">{String(formErrors.username)}</p>}
                 </div>
                 <div>
                   <label htmlFor="user-email" className="label">Email (para recuperación)</label>
-                  <input id="user-email" name="email" autoComplete="email" aria-invalid={!!formErrors.email} aria-describedby={formErrors.email ? "user-error-email" : undefined} type="email" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} className="input mt-1" />
+                  <input id="user-email" name="email" autoComplete="email" maxLength={254} aria-invalid={!!formErrors.email} aria-describedby={formErrors.email ? "user-error-email" : undefined} type="email" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} className="input mt-1" />
                   {formErrors.email && <p id="user-error-email" className="text-red-700 text-sm">{String(formErrors.email)}</p>}
                 </div>
               </div>
               <div className="grid sm:grid-cols-2 gap-4">
                 <div>
                   <label htmlFor="user-first_name" className="label">Nombres</label>
-                  <input id="user-first_name" name="first_name" autoComplete="given-name" aria-invalid={!!formErrors.first_name} aria-describedby={formErrors.first_name ? "user-error-first_name" : undefined} type="text" value={formData.first_name} onChange={e => setFormData({...formData, first_name: e.target.value})} className="input mt-1" />
+                  <input id="user-first_name" name="first_name" autoComplete="given-name" maxLength={150} aria-invalid={!!formErrors.first_name} aria-describedby={formErrors.first_name ? "user-error-first_name" : undefined} type="text" value={formData.first_name} onChange={e => setFormData({...formData, first_name: e.target.value})} className="input mt-1" />
                   {formErrors.first_name && <p id="user-error-first_name" className="text-red-700 text-sm">{String(formErrors.first_name)}</p>}
                 </div>
                 <div>
                   <label htmlFor="user-last_name" className="label">Apellidos</label>
-                  <input id="user-last_name" name="last_name" autoComplete="family-name" aria-invalid={!!formErrors.last_name} aria-describedby={formErrors.last_name ? "user-error-last_name" : undefined} type="text" value={formData.last_name} onChange={e => setFormData({...formData, last_name: e.target.value})} className="input mt-1" />
+                  <input id="user-last_name" name="last_name" autoComplete="family-name" maxLength={150} aria-invalid={!!formErrors.last_name} aria-describedby={formErrors.last_name ? "user-error-last_name" : undefined} type="text" value={formData.last_name} onChange={e => setFormData({...formData, last_name: e.target.value})} className="input mt-1" />
                   {formErrors.last_name && <p id="user-error-last_name" className="text-red-700 text-sm">{String(formErrors.last_name)}</p>}
                 </div>
               </div>
@@ -364,7 +364,7 @@ export default function AdminUsuariosPage() {
                   Contraseña {editingUser ? '(dejar vacío para no cambiar)' : '*'}
                   <button type="button" onClick={() => setShowPassword(!showPassword)} className="text-xs text-blue-500 hover:underline">{showPassword ? 'Ocultar' : 'Mostrar'}</button>
                 </label>
-                <input id="user-password" name="password" aria-invalid={!!formErrors.password} aria-describedby={formErrors.password ? "user-error-password" : undefined} autoComplete="new-password" type={showPassword ? 'text' : 'password'} value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} className="input mt-1" placeholder={editingUser ? '••••••••' : 'Mínimo 8 caracteres'} required={!editingUser} />
+                <input id="user-password" name="password" minLength={8} maxLength={128} aria-invalid={!!formErrors.password} aria-describedby={formErrors.password ? "user-error-password" : undefined} autoComplete="new-password" type={showPassword ? 'text' : 'password'} value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} className="input mt-1" placeholder={editingUser ? '••••••••' : 'Mínimo 8 caracteres'} required={!editingUser} />
               </div>
               {formErrors.password && <p id="user-error-password" className="text-red-700 text-sm">{String(formErrors.password)}</p>}
               <div className="flex justify-end gap-3 pt-4 border-t border-slate-200">

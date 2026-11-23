@@ -29,6 +29,7 @@ def test_remaining_findings_are_reduced_to_one_category_without_disease_names():
     result = pretrained_result({'Effusion': .49, 'Atelectasis': .99, 'Pneumonia': .82, 'Mass': .60}, NAMES)
     assert result['enfoque']['estado'] == 'orientacion_categoria'
     assert result['categoria']['clave'] == 'infecciosa'
+    assert result['categoria']['puntuacion_modelo'] == pytest.approx(.82)
     assert result['categoria']['enfermedades'] == []
     assert probabilities_es(result) == {}
     assert result['enfoque']['objetivos_gradcam'] == [

@@ -8,30 +8,10 @@ const GENERO_LABEL = { M: 'Masculino', F: 'Femenino', Otro: 'Otro' }
 
 import { errorMessage, fieldErrors } from '../../api/errors'
 import { calcularEdad } from './patientUtils'
+import { patientBirthDateBounds, validatePatient } from '../../utils/patientValidation'
 
 // ── Reglas de validación ──
-const RE_NOMBRE = /^[\p{L}\p{M} '’-]+$/u
-const RE_CI = /^[A-Za-z0-9 ._-]+$/
-
-function validar(form) {
-  const e = {}
-  if (!form.nombres.trim()) e.nombres = 'Requerido'
-  else if (!RE_NOMBRE.test(form.nombres.trim())) e.nombres = 'Solo letras y espacios'
-  if (!form.apellidos.trim()) e.apellidos = 'Requerido'
-  else if (!RE_NOMBRE.test(form.apellidos.trim())) e.apellidos = 'Solo letras y espacios'
-  if (!form.ci.trim()) e.ci = 'Requerido'
-  else if (!RE_CI.test(form.ci.trim())) e.ci = 'Use letras, números, espacios o guiones'
-  else if (form.ci.trim().length > 20) e.ci = 'Máximo 20 caracteres'
-  if (!form.fecha_nacimiento) e.fecha_nacimiento = 'Requerido'
-  else {
-    const f = new Date(form.fecha_nacimiento)
-    const hoy = new Date()
-    if (f > hoy) e.fecha_nacimiento = 'No puede ser futura'
-    else if (calcularEdad(form.fecha_nacimiento) > 120) e.fecha_nacimiento = 'Fecha no válida (>120 años)'
-  }
-  if (!form.genero) e.genero = 'Requerido'
-  return e
-}
+const validar = validatePatient
 
 const FORM_VACIO = { nombres: '', apellidos: '', ci: '', fecha_nacimiento: '', genero: 'M' }
 
@@ -54,6 +34,7 @@ export default function BuscadorPaciente({ seleccionado, onSelect }) {
   const [creando, setCreando] = useState(false)
 
   const boxRef = useRef(null)
+  const birthDateBounds = patientBirthDateBounds()
 
   // ── Debounce 400ms ──
   useEffect(() => {
@@ -200,7 +181,9 @@ export default function BuscadorPaciente({ seleccionado, onSelect }) {
               onChange={(e) => setCampo(k, e.target.value)}
               onBlur={() => blur(k)}
               placeholder={ph}
-              max={type === 'date' ? new Date().toISOString().split('T')[0] : undefined}
+              min={type === 'date' ? birthDateBounds.min : undefined}
+              max={type === 'date' ? birthDateBounds.max : undefined}
+              autoComplete={k === 'nombres' ? 'given-name' : k === 'apellidos' ? 'family-name' : 'off'}
               className={`w-full px-3 py-2 rounded-lg border font-body text-sm transition-all
                 focus:outline-none focus:ring-2 focus:ring-teal-med/40 ${mono ? 'font-mono' : ''}
                 ${errores[k] ? 'border-danger/60 bg-danger/5' : 'border-slate-200 focus:border-teal-med'}`}

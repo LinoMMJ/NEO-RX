@@ -79,7 +79,9 @@ backend/.pytest_tmp*/
 /.run-local/
 /--pages-dir/
 /tmp/
-/qa/
+/qa/*
+!/qa/README_PLAYWRIGHT.md
+!/qa/RESUMEN_PRUEBAS_PLAYWRIGHT.md
 /contact_sheets/
 /documentos/
 /entrega_presentacion/
